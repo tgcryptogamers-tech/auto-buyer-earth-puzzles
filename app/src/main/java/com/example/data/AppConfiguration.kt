@@ -28,7 +28,7 @@ data class AppConfiguration(
     val tabSwitchIntervalMs: Long = 150L,
     val tabSwitchRandomizationMs: Int = 50,
     val clickRandomizationRadiusPx: Int = 10,
-    val enableActualBuying: Boolean = false,
+    val enableActualBuying: Boolean = true,
     val verboseOcrLogging: Boolean = false,
     val useSearchCycles: Boolean = false,
     val cycle1DurationMin: Int = 2,

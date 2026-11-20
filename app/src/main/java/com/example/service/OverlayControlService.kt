@@ -449,6 +449,22 @@ class OverlayControlService : Service() {
                 }
             }
         )
+        logHeaderRow.addView(
+            Button(this).apply {
+                text = "ЭКСПОРТ"
+                textSize = 10f
+                setBackgroundColor(Color.parseColor("#21332B"))
+                setTextColor(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { leftMargin = 8 }
+                setOnClickListener {
+                    val content = BotLogs.getAllLogsText().ifBlank { "Логи пока пусты" }
+                    BotLogs.shareText(this@OverlayControlService, "Логи Earth Puzzles", content)
+                }
+            }
+        )
         rootLayout.addView(logHeaderRow)
 
         val logScroll = ScrollView(this).apply {
@@ -506,7 +522,8 @@ class OverlayControlService : Service() {
         val cfg = currentConfig ?: return
         val target = MarketTab.fromString(cfg.buyTarget)
         val switchLabel = if (cfg.switchBetweenTabs) "Puzzles ↔ Lands" else target.tabLabel
-        configText.text = "Покупка: ТОЛЬКО ${target.tabLabel}\nВкладки: $switchLabel | Порог: ${cfg.priceThreshold}"
+        val buyLabel = if (cfg.enableActualBuying) "Покупка: ВКЛ" else "Только лог"
+        configText.text = "Цель: ТОЛЬКО ${target.tabLabel} ($buyLabel)\nВкладки: $switchLabel | Порог: ${cfg.priceThreshold}"
 
         if (cfg.autoBuyEnabled) {
             toggleBtn.text = "ПАУЗА"

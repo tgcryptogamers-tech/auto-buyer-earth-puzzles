@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,17 +22,23 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -44,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -51,13 +59,16 @@ import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.AppConfiguration
 import com.example.data.MarketTab
+import com.example.engine.BotLogs
 import com.example.ui.components.BuyTargetSelector
 import com.example.ui.components.MarketTabsStripPreview
 import com.example.ui.components.SectionCard
+import com.example.ui.theme.JetBrainsMonoFontFamily
 
 @Composable
 fun DashboardScreen(
     config: AppConfiguration,
+    logs: List<String>,
     isAccessibilityEnabled: Boolean,
     isOverlayGranted: Boolean,
     isScreenCaptureAuthorized: Boolean,
@@ -73,9 +84,12 @@ fun DashboardScreen(
     onResetCooldown: () -> Unit,
     onSelectBuyTarget: (MarketTab) -> Unit,
     onToggleTabSwitching: (Boolean) -> Unit,
+    onToggleActualBuying: (Boolean) -> Unit,
+    onClearLogs: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val selectedTarget = MarketTab.fromString(config.buyTarget)
 
     Box(
@@ -419,6 +433,135 @@ fun DashboardScreen(
                         buyTarget = selectedTarget,
                         switchBetweenTabs = config.switchBetweenTabs
                     )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { onToggleActualBuying(!config.enableActualBuying) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ShoppingCart,
+                                contentDescription = null,
+                                tint = if (config.enableActualBuying) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.secondary
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Автоматическая покупка",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (config.enableActualBuying) {
+                                        "ВКЛ — бот нажимает на лот и кнопку Buy"
+                                    } else {
+                                        "ВЫКЛ — только логирование без покупок"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = config.enableActualBuying,
+                            onCheckedChange = onToggleActualBuying,
+                            modifier = Modifier.testTag("dashboard_actual_buying_toggle")
+                        )
+                    }
+                }
+            }
+
+            // Live Logs Terminal right on Dashboard
+            item {
+                SectionCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Terminal,
+                                contentDescription = "Лог",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Лог работы (${logs.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Row {
+                            IconButton(
+                                onClick = {
+                                    val copied = BotLogs.copyToClipboard(context)
+                                    Toast.makeText(
+                                        context,
+                                        if (copied) "Логи скопированы" else "Не удалось скопировать",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                },
+                                modifier = Modifier.testTag("dashboard_copy_logs")
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Копировать")
+                            }
+                            IconButton(
+                                onClick = {
+                                    val text = BotLogs.getAllLogsText().ifBlank { "Логи пусты" }
+                                    BotLogs.shareText(context, "Логи Earth Puzzles", text)
+                                },
+                                modifier = Modifier.testTag("dashboard_share_logs")
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = "Поделиться")
+                            }
+                            IconButton(
+                                onClick = onClearLogs,
+                                modifier = Modifier.testTag("dashboard_clear_logs")
+                            ) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = "Очистить")
+                            }
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.background)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (logs.isEmpty()) {
+                            Text(
+                                text = "Логи пока пусты. Запустите кружок или мониторинг.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            logs.takeLast(15).reversed().forEach { line ->
+                                Text(
+                                    text = line,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

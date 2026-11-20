@@ -58,6 +58,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
     @Volatile private var cycleEndTimeMs = 0L
     @Volatile private var purchasesThisCycleRun = 0
     @Volatile private var cycleInitialized = false
+    @Volatile private var lastHeartbeatLogTime = 0L
 
     companion object {
         const val CONFIRMATION_DIALOG_DELAY_MS = 180L
@@ -129,6 +130,12 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         automationJob = serviceScope.launch {
             try {
                 val db = AppDatabase.getDatabase(applicationContext)
+                val initialCfg = db.configurationDao().getConfiguration()
+                if (initialCfg != null) {
+                    val t = MarketTab.fromString(initialCfg.buyTarget)
+                    val modeText = if (initialCfg.enableActualBuying) "АВТОПОКУПКА ВКЛ" else "ТОЛЬКО МОНИТОРИНГ"
+                    BotLogs.addLog("🎯 Цель: только ${t.tabLabel} | Порог: ${initialCfg.priceThreshold} | $modeText")
+                }
                 while (isRunning) {
                     val now = System.currentTimeMillis()
                     if (now < cooldownUntilMillis) {
@@ -475,6 +482,14 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     } finally {
                         cropBmp.recycle()
                     }
+                }
+            }
+
+            if (foundLotsCount == 0) {
+                val nowMs = System.currentTimeMillis()
+                if (config.verboseOcrLogging || nowMs - lastHeartbeatLogTime >= 3000L) {
+                    lastHeartbeatLogTime = nowMs
+                    BotLogs.addLog("🔎 [${targetTab.tabLabel}] Скан выполнен: подходящих лотов на экране нет (порог ${config.priceThreshold})")
                 }
             }
         } finally {

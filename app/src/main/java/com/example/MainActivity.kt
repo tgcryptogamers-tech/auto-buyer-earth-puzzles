@@ -233,6 +233,7 @@ private fun EarthPuzzlesApp(
                     AppDestination.DASHBOARD -> {
                         DashboardScreen(
                             config = config,
+                            logs = logs,
                             isAccessibilityEnabled = isAccessibilityEnabled,
                             isOverlayGranted = isOverlayGranted,
                             isScreenCaptureAuthorized = isScreenCaptureAuthorized,
@@ -248,6 +249,10 @@ private fun EarthPuzzlesApp(
                             onResetCooldown = viewModel::resetCooldown,
                             onSelectBuyTarget = viewModel::setBuyTarget,
                             onToggleTabSwitching = viewModel::setTabSwitchingEnabled,
+                            onToggleActualBuying = { enabled ->
+                                viewModel.updateConfiguration { it.copy(enableActualBuying = enabled) }
+                            },
+                            onClearLogs = viewModel::clearLogs,
                             onOpenSettings = { currentDestination = AppDestination.SETTINGS }
                         )
                     }
