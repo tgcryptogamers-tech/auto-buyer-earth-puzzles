@@ -36,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -57,11 +58,18 @@ import kotlin.math.abs
 fun SettingsScreen(
     config: AppConfiguration,
     onUpdateConfig: ((AppConfiguration) -> AppConfiguration) -> Unit,
+    onToggleBuyTab: (MarketTab) -> Unit,
+    onSelectBothBuyTabs: () -> Unit,
     onToggleCalibration: (Boolean) -> Unit,
     onResetCoordinates: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val selectedTarget = MarketTab.fromString(config.buyTarget)
+    var tabSwitchSlider by remember(config.tabSwitchIntervalMs) {
+        mutableFloatStateOf(config.tabSwitchIntervalMs.toFloat().coerceIn(30f, 1500f))
+    }
+    var scanIntervalSlider by remember(config.scanIntervalMs) {
+        mutableFloatStateOf(config.scanIntervalMs.toFloat().coerceIn(30f, 2000f))
+    }
 
     var thresholdInput by remember(config.priceThreshold) {
         mutableStateOf(config.priceThreshold.toString())
@@ -122,7 +130,7 @@ fun SettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Выберите, что бот должен покупать в игре: только пазлы или только землю.",
+                                text = "Можно выбрать только Puzzles, только Lands или сразу обе вкладки для параллельного выкупа.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -130,18 +138,21 @@ fun SettingsScreen(
                     }
 
                     BuyTargetSelector(
-                        selectedTarget = selectedTarget,
-                        onSelectTarget = { target ->
-                            onUpdateConfig { it.copy(buyTarget = target.tabLabel) }
-                        }
+                        buyPuzzles = config.buyPuzzles,
+                        buyLands = config.buyLands,
+                        onToggleTab = onToggleBuyTab,
+                        onSelectBoth = onSelectBothBuyTabs
                     )
 
                     SettingsSwitchRow(
                         title = "Переключение вкладок Puzzles ↔ Lands в игре",
-                        subtitle = if (config.switchBetweenTabs) {
-                            "Бот переключается между Puzzles и Lands для обновления рынка, но покупает только ${selectedTarget.tabLabel}"
-                        } else {
-                            "Оставаться только на вкладке ${selectedTarget.tabLabel}"
+                        subtitle = when {
+                            config.buyPuzzles && config.buyLands ->
+                                "Бот поочерёдно переключает Puzzles и Lands и покупает подходящие лоты на обеих вкладках"
+                            config.switchBetweenTabs ->
+                                "Бот переключается между Puzzles и Lands для обновления рынка, но покупает ${config.buyTargetSummary()}"
+                            else ->
+                                "Оставаться только на вкладке ${if (config.buyLands) "Lands" else "Puzzles"}"
                         },
                         checked = config.switchBetweenTabs,
                         onCheckedChange = { checked ->
@@ -151,8 +162,8 @@ fun SettingsScreen(
                     )
 
                     MarketTabsStripPreview(
-                        activeTab = selectedTarget,
-                        buyTarget = selectedTarget,
+                        buyPuzzles = config.buyPuzzles,
+                        buyLands = config.buyLands,
                         switchBetweenTabs = config.switchBetweenTabs
                     )
                 }
@@ -341,32 +352,36 @@ fun SettingsScreen(
 
                     Column {
                         Text(
-                            text = "Задержка переключения вкладок: ${config.tabSwitchIntervalMs} мс",
+                            text = "Задержка переключения вкладок: ${tabSwitchSlider.toLong()} мс",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Slider(
-                            value = config.tabSwitchIntervalMs.toFloat().coerceIn(50f, 1500f),
-                            onValueChange = { v ->
-                                onUpdateConfig { it.copy(tabSwitchIntervalMs = v.toLong()) }
+                            value = tabSwitchSlider,
+                            onValueChange = { v -> tabSwitchSlider = v },
+                            onValueChangeFinished = {
+                                val ms = tabSwitchSlider.toLong().coerceIn(30L, 1500L)
+                                onUpdateConfig { it.copy(tabSwitchIntervalMs = ms) }
                             },
-                            valueRange = 50f..1500f,
+                            valueRange = 30f..1500f,
                             modifier = Modifier.testTag("settings_tab_switch_slider")
                         )
                     }
 
                     Column {
                         Text(
-                            text = "Интервал сканирования экрана: ${config.scanIntervalMs} мс",
+                            text = "Интервал сканирования экрана: ${scanIntervalSlider.toLong()} мс",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Slider(
-                            value = config.scanIntervalMs.toFloat().coerceIn(150f, 2000f),
-                            onValueChange = { v ->
-                                onUpdateConfig { it.copy(scanIntervalMs = v.toLong()) }
+                            value = scanIntervalSlider,
+                            onValueChange = { v -> scanIntervalSlider = v },
+                            onValueChangeFinished = {
+                                val ms = scanIntervalSlider.toLong().coerceIn(30L, 2000L)
+                                onUpdateConfig { it.copy(scanIntervalMs = ms) }
                             },
-                            valueRange = 150f..2000f,
+                            valueRange = 30f..2000f,
                             modifier = Modifier.testTag("settings_scan_interval_slider")
                         )
                     }

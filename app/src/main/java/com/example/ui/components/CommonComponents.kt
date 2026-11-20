@@ -65,34 +65,82 @@ fun SectionCard(
 
 @Composable
 fun BuyTargetSelector(
-    selectedTarget: MarketTab,
-    onSelectTarget: (MarketTab) -> Unit,
+    buyPuzzles: Boolean,
+    buyLands: Boolean,
+    onToggleTab: (MarketTab) -> Unit,
+    onSelectBoth: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    val bothSelected = buyPuzzles && buyLands
+    Column(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        TargetOptionChip(
-            tab = MarketTab.PUZZLES,
-            title = "Только Puzzles",
-            subtitle = "Пазлы земли",
-            selected = selectedTarget == MarketTab.PUZZLES,
-            onClick = { onSelectTarget(MarketTab.PUZZLES) },
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            TargetOptionChip(
+                tab = MarketTab.PUZZLES,
+                title = "Puzzles",
+                subtitle = if (buyPuzzles) "Пазлы земли: ВКЛ" else "Пазлы земли: ВЫКЛ",
+                selected = buyPuzzles,
+                onClick = { onToggleTab(MarketTab.PUZZLES) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("select_buy_puzzles")
+            )
+            TargetOptionChip(
+                tab = MarketTab.LANDS,
+                title = "Lands",
+                subtitle = if (buyLands) "Земля: ВКЛ" else "Земля: ВЫКЛ",
+                selected = buyLands,
+                onClick = { onToggleTab(MarketTab.LANDS) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("select_buy_lands")
+            )
+        }
+
+        Surface(
             modifier = Modifier
-                .weight(1f)
-                .testTag("select_buy_puzzles")
-        )
-        TargetOptionChip(
-            tab = MarketTab.LANDS,
-            title = "Только Lands",
-            subtitle = "Участки земли",
-            selected = selectedTarget == MarketTab.LANDS,
-            onClick = { onSelectTarget(MarketTab.LANDS) },
-            modifier = Modifier
-                .weight(1f)
-                .testTag("select_buy_lands")
-        )
+                .fillMaxWidth()
+                .minimumInteractiveComponentSize()
+                .clip(MaterialTheme.shapes.small)
+                .clickable(onClick = onSelectBoth)
+                .testTag("select_buy_both"),
+            shape = MaterialTheme.shapes.small,
+            color = if (bothSelected) {
+                MaterialTheme.colorScheme.tertiaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            },
+            border = BorderStroke(
+                width = if (bothSelected) 1.5.dp else 1.dp,
+                color = if (bothSelected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outlineVariant
+            )
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = if (bothSelected) {
+                        "✓ Покупать одновременно: Puzzles и Lands"
+                    } else {
+                        "Выбрать обе вкладки сразу (Puzzles + Lands)"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (bothSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (bothSelected) {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -192,11 +240,18 @@ private fun TargetOptionChip(
 
 @Composable
 fun MarketTabsStripPreview(
-    activeTab: MarketTab,
-    buyTarget: MarketTab,
+    buyPuzzles: Boolean,
+    buyLands: Boolean,
     switchBetweenTabs: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val activeSummary = when {
+        buyPuzzles && buyLands -> "Покупка: Puzzles + Lands"
+        switchBetweenTabs -> "Puzzles ↔ Lands"
+        buyLands -> "Фикс: Lands"
+        else -> "Фикс: Puzzles"
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -216,7 +271,7 @@ fun MarketTabsStripPreview(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = if (switchBetweenTabs) "Puzzles ↔ Lands" else "Фикс: ${buyTarget.tabLabel}",
+                text = activeSummary,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.secondary
             )
@@ -228,14 +283,14 @@ fun MarketTabsStripPreview(
         ) {
             MarketStripTabItem(
                 label = "Puzzles",
-                isActive = activeTab == MarketTab.PUZZLES,
-                isTarget = buyTarget == MarketTab.PUZZLES,
+                isActive = buyPuzzles,
+                isTarget = buyPuzzles,
                 modifier = Modifier.weight(1f)
             )
             MarketStripTabItem(
                 label = "Lands",
-                isActive = activeTab == MarketTab.LANDS,
-                isTarget = buyTarget == MarketTab.LANDS,
+                isActive = buyLands,
+                isTarget = buyLands,
                 modifier = Modifier.weight(1f)
             )
             MarketStripTabItem(

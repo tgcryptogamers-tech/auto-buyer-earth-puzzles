@@ -247,7 +247,8 @@ private fun EarthPuzzlesApp(
                             onStopOverlay = viewModel::stopOverlayService,
                             onToggleMonitoring = onToggleMonitoring,
                             onResetCooldown = viewModel::resetCooldown,
-                            onSelectBuyTarget = viewModel::setBuyTarget,
+                            onToggleBuyTab = viewModel::toggleBuyTab,
+                            onSelectBothBuyTabs = viewModel::selectBothBuyTabs,
                             onToggleTabSwitching = viewModel::setTabSwitchingEnabled,
                             onToggleActualBuying = { enabled ->
                                 viewModel.updateConfiguration { it.copy(enableActualBuying = enabled) }
@@ -261,6 +262,8 @@ private fun EarthPuzzlesApp(
                         SettingsScreen(
                             config = config,
                             onUpdateConfig = viewModel::updateConfiguration,
+                            onToggleBuyTab = viewModel::toggleBuyTab,
+                            onSelectBothBuyTabs = viewModel::selectBothBuyTabs,
                             onToggleCalibration = viewModel::setCalibrationEnabled,
                             onResetCoordinates = viewModel::resetCoordinates
                         )

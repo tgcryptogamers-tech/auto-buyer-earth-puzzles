@@ -106,9 +106,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setBuyTarget(target: MarketTab) {
-        updateConfiguration { it.copy(buyTarget = target.tabLabel) }
-        BotLogs.addLog("🎯 Выбрана цель покупки: ТОЛЬКО ${target.tabLabel}")
+    fun toggleBuyTab(tab: MarketTab) {
+        updateConfiguration { cfg ->
+            val (nextPuzzles, nextLands) = when (tab) {
+                MarketTab.PUZZLES -> {
+                    val toggled = !cfg.buyPuzzles
+                    if (!toggled && !cfg.buyLands) true to false else toggled to cfg.buyLands
+                }
+                MarketTab.LANDS -> {
+                    val toggled = !cfg.buyLands
+                    if (!toggled && !cfg.buyPuzzles) false to true else cfg.buyPuzzles to toggled
+                }
+            }
+            val nextPrimary = when {
+                nextPuzzles -> MarketTab.PUZZLES.tabLabel
+                nextLands -> MarketTab.LANDS.tabLabel
+                else -> cfg.buyTarget
+            }
+            val updated = cfg.copy(
+                buyPuzzles = nextPuzzles,
+                buyLands = nextLands,
+                buyTarget = nextPrimary
+            )
+            BotLogs.addLog("🎯 Цель покупки: ${updated.buyTargetSummary()}")
+            updated
+        }
+    }
+
+    fun selectBothBuyTabs() {
+        updateConfiguration { cfg ->
+            cfg.copy(
+                buyPuzzles = true,
+                buyLands = true,
+                buyTarget = MarketTab.PUZZLES.tabLabel
+            )
+        }
+        BotLogs.addLog("🎯 Цель покупки: Puzzles + Lands (обе вкладки)")
     }
 
     fun setTabSwitchingEnabled(enabled: Boolean) {

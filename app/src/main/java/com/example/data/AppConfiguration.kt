@@ -18,13 +18,15 @@ enum class MarketTab(val tabLabel: String, val displayRu: String) {
 data class AppConfiguration(
     @PrimaryKey val id: Int = 1,
     val buyTarget: String = MarketTab.PUZZLES.tabLabel,
+    val buyPuzzles: Boolean = true,
+    val buyLands: Boolean = false,
     val switchBetweenTabs: Boolean = true,
     val autoBuyEnabled: Boolean = false,
     val isCalibrationEnabled: Boolean = false,
     val priceThreshold: Double = 100.0,
     val usePriceThreshold: Boolean = true,
     val isLessThanOperator: Boolean = true,
-    val scanIntervalMs: Long = 350L,
+    val scanIntervalMs: Long = 150L,
     val tabSwitchIntervalMs: Long = 150L,
     val tabSwitchRandomizationMs: Int = 50,
     val clickRandomizationRadiusPx: Int = 10,
@@ -43,4 +45,18 @@ data class AppConfiguration(
     val calibratedLandsY: Float = -1f,
     val calibratedConfirmX: Float = -1f,
     val calibratedConfirmY: Float = -1f
-)
+) {
+    fun activeBuyTabs(): List<MarketTab> {
+        val tabs = buildList {
+            if (buyPuzzles) add(MarketTab.PUZZLES)
+            if (buyLands) add(MarketTab.LANDS)
+        }
+        return tabs.ifEmpty { listOf(MarketTab.fromString(buyTarget)) }
+    }
+
+    fun buyTargetSummary(): String = when {
+        buyPuzzles && buyLands -> "Puzzles + Lands"
+        buyLands -> "Только Lands"
+        else -> "Только Puzzles"
+    }
+}

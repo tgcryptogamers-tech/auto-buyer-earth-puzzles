@@ -534,10 +534,14 @@ class OverlayControlService : Service() {
         val toggleBtn = buttonsRow.getChildAt(0) as? Button ?: return
 
         val cfg = currentConfig ?: return
-        val target = MarketTab.fromString(cfg.buyTarget)
-        val switchLabel = if (cfg.switchBetweenTabs) "Puzzles ↔ Lands" else target.tabLabel
+        val switchLabel = when {
+            cfg.buyPuzzles && cfg.buyLands -> "Puzzles ↔ Lands (обе)"
+            cfg.switchBetweenTabs -> "Puzzles ↔ Lands"
+            cfg.buyLands -> "Lands"
+            else -> "Puzzles"
+        }
         val buyLabel = if (cfg.enableActualBuying) "Покупка: ВКЛ" else "Только лог"
-        configText.text = "Цель: ТОЛЬКО ${target.tabLabel} ($buyLabel)\nВкладки: $switchLabel | Порог: ${cfg.priceThreshold}"
+        configText.text = "Цель: ${cfg.buyTargetSummary()} ($buyLabel)\nВкладки: $switchLabel (${cfg.tabSwitchIntervalMs}мс) | Порог: ${cfg.priceThreshold}"
 
         if (cfg.autoBuyEnabled) {
             toggleBtn.text = "ПАУЗА"

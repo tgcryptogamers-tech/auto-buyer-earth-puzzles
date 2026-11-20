@@ -85,7 +85,8 @@ fun DashboardScreen(
     onStopOverlay: () -> Unit,
     onToggleMonitoring: () -> Unit,
     onResetCooldown: () -> Unit,
-    onSelectBuyTarget: (MarketTab) -> Unit,
+    onToggleBuyTab: (MarketTab) -> Unit,
+    onSelectBothBuyTabs: () -> Unit,
     onToggleTabSwitching: (Boolean) -> Unit,
     onToggleActualBuying: (Boolean) -> Unit,
     onClearLogs: () -> Unit,
@@ -95,7 +96,6 @@ fun DashboardScreen(
     val context = LocalContext.current
     @Suppress("DEPRECATION")
     val composeClipboard = LocalClipboardManager.current
-    val selectedTarget = MarketTab.fromString(config.buyTarget)
 
     Box(
         modifier = modifier.fillMaxSize(),
@@ -368,12 +368,12 @@ fun DashboardScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Что покупаем в игре",
+                                text = "Что покупаем в игре: ${config.buyTargetSummary()}",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Либо только Puzzles (пазлы земли), либо только Lands (земля)",
+                                text = "Можно выбрать Puzzles, Lands или сразу обе вкладки",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -389,8 +389,10 @@ fun DashboardScreen(
                     }
 
                     BuyTargetSelector(
-                        selectedTarget = selectedTarget,
-                        onSelectTarget = onSelectBuyTarget
+                        buyPuzzles = config.buyPuzzles,
+                        buyLands = config.buyLands,
+                        onToggleTab = onToggleBuyTab,
+                        onSelectBoth = onSelectBothBuyTabs
                     )
 
                     Row(
@@ -420,7 +422,11 @@ fun DashboardScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Обновляет рынок в игре (${config.tabSwitchIntervalMs} мс)",
+                                    text = if (config.buyPuzzles && config.buyLands) {
+                                        "Поочерёдный скан и покупка на обеих вкладках (${config.tabSwitchIntervalMs} мс)"
+                                    } else {
+                                        "Обновляет рынок в игре (${config.tabSwitchIntervalMs} мс)"
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -434,8 +440,8 @@ fun DashboardScreen(
                     }
 
                     MarketTabsStripPreview(
-                        activeTab = selectedTarget,
-                        buyTarget = selectedTarget,
+                        buyPuzzles = config.buyPuzzles,
+                        buyLands = config.buyLands,
                         switchBetweenTabs = config.switchBetweenTabs
                     )
 

@@ -65,9 +65,11 @@ class LootBuyerAccessibilityService : AccessibilityService() {
     @Volatile private var purchasesThisCycleRun = 0
     @Volatile private var cycleInitialized = false
     @Volatile private var lastHeartbeatLogTime = 0L
+    @Volatile private var nextMultiTabIndex = 0
+    @Volatile private var checkModalBeforeSwitch = true
 
     companion object {
-        const val CONFIRMATION_INITIAL_DELAY_MS = 220L
+        const val CONFIRMATION_INITIAL_DELAY_MS = 180L
 
         @Volatile
         var instance: LootBuyerAccessibilityService? = null
@@ -131,6 +133,8 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         cycleInitialized = false
         currentCycleNumber = 1
         purchasesThisCycleRun = 0
+        nextMultiTabIndex = 0
+        checkModalBeforeSwitch = true
 
         BotLogs.addLog("🚀 Запуск цикла бота для вкладок Puzzles и Lands...")
 
@@ -139,9 +143,8 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                 val db = AppDatabase.getDatabase(applicationContext)
                 val initialCfg = db.configurationDao().getConfiguration()
                 if (initialCfg != null) {
-                    val t = MarketTab.fromString(initialCfg.buyTarget)
                     val modeText = if (initialCfg.enableActualBuying) "АВТОПОКУПКА ВКЛ" else "ТОЛЬКО МОНИТОРИНГ"
-                    BotLogs.addLog("🎯 Цель: только ${t.tabLabel} | Порог: ${initialCfg.priceThreshold} | $modeText")
+                    BotLogs.addLog("🎯 Цель: ${initialCfg.buyTargetSummary()} | Порог: ${initialCfg.priceThreshold} | $modeText")
                 }
                 while (isRunning) {
                     val now = System.currentTimeMillis()
@@ -165,7 +168,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     }
 
                     performOcrScreenScan(config, db)
-                    delay(config.scanIntervalMs.coerceAtLeast(150L))
+                    delay(config.scanIntervalMs.coerceAtLeast(30L))
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -270,84 +273,103 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         val screenHeight = metrics.heightPixels.toFloat()
         val density = metrics.density
 
-        val targetTab = MarketTab.fromString(config.buyTarget)
-        val alternateTab = if (targetTab == MarketTab.PUZZLES) MarketTab.LANDS else MarketTab.PUZZLES
-
-        // Step 0: Check BEFORE switching tabs if a modal dialog (confirmation / error / rate-limit / mail) is already open!
-        val preBitmap = MediaProjectionHelper.getLatestScreenshot()
-        if (preBitmap == null) {
-            BotLogs.addLog("🔍 [ОЖИДАНИЕ] Включите захват экрана (Screen Capture) и откройте рынок в игре.")
-            return@withContext
+        val activeTabs = config.activeBuyTabs()
+        val isMultiTab = activeTabs.size >= 2
+        val targetTab: MarketTab
+        val alternateTab: MarketTab
+        if (isMultiTab) {
+            val idx = nextMultiTabIndex % activeTabs.size
+            targetTab = activeTabs[idx]
+            alternateTab = activeTabs[(idx + 1) % activeTabs.size]
+        } else {
+            targetTab = activeTabs.first()
+            alternateTab = if (targetTab == MarketTab.PUZZLES) MarketTab.LANDS else MarketTab.PUZZLES
         }
 
-        try {
-            val preScaleX = screenWidth / preBitmap.width
-            val preScaleY = screenHeight / preBitmap.height
-            val preResult = Tasks.await(recognizer.process(InputImage.fromBitmap(preBitmap, 0)))
-            scanTabsFromOcrResults(preResult.textBlocks, preScaleX, preScaleY, screenHeight)
+        val needCoordsDiscovery = getTabCoordinates(targetTab, config) == null ||
+            ((config.switchBetweenTabs || isMultiTab) && getTabCoordinates(alternateTab, config) == null)
 
-            val preLines = preResult.textBlocks.flatMap { it.lines }.filter { line ->
-                !isInsideOverlay(line.boundingBox, screenWidth, screenHeight, density, preScaleX, preScaleY) &&
-                    !isLogOrOverlayText(line.text)
+        // Step 0: Only run pre-switch OCR when discovering tab coords or when a modal check is flagged.
+        // Skipping this on regular scans keeps tab-switching directly proportional to the user's slider.
+        if (checkModalBeforeSwitch || needCoordsDiscovery) {
+            val preBitmap = MediaProjectionHelper.getLatestScreenshot()
+            if (preBitmap == null) {
+                BotLogs.addLog("🔍 [ОЖИДАНИЕ] Включите захват экрана (Screen Capture) и откройте рынок в игре.")
+                return@withContext
             }
 
-            if (handleTryThroughDialogIfNeeded(preLines, preScaleX, preScaleY, screenWidth, screenHeight, config)) {
-                return@withContext
+            try {
+                val preScaleX = screenWidth / preBitmap.width
+                val preScaleY = screenHeight / preBitmap.height
+                val preResult = Tasks.await(recognizer.process(InputImage.fromBitmap(preBitmap, 0)))
+                scanTabsFromOcrResults(preResult.textBlocks, preScaleX, preScaleY, screenHeight)
+
+                val preLines = preResult.textBlocks.flatMap { it.lines }.filter { line ->
+                    !isInsideOverlay(line.boundingBox, screenWidth, screenHeight, density, preScaleX, preScaleY) &&
+                        !isLogOrOverlayText(line.text)
+                }
+
+                if (handleTryThroughDialogIfNeeded(preLines, preScaleX, preScaleY, screenWidth, screenHeight, config)) {
+                    checkModalBeforeSwitch = true
+                    return@withContext
+                }
+                if (dismissSystemDialogIfNeeded(preLines, preScaleX, preScaleY, screenWidth, screenHeight, config)) {
+                    checkModalBeforeSwitch = true
+                    return@withContext
+                }
+                if (config.enableActualBuying && isConfirmationDialogShowing(preLines, preScaleX, preScaleY, screenWidth, screenHeight)) {
+                    confirmOpenPurchaseDialog(
+                        preLines, preScaleX, preScaleY, screenWidth, screenHeight,
+                        config, db, preBitmap, targetTab, recognizer
+                    )
+                    return@withContext
+                }
+                checkModalBeforeSwitch = false
+            } catch (e: Exception) {
+                BotLogs.addLog("⚠️ Ошибка первичного OCR экрана: ${e.message}")
+            } finally {
+                preBitmap.recycle()
             }
-            if (dismissSystemDialogIfNeeded(preLines, preScaleX, preScaleY, screenWidth, screenHeight, config)) {
-                return@withContext
-            }
-            if (config.enableActualBuying && isConfirmationDialogShowing(preLines, preScaleX, preScaleY, screenWidth, screenHeight)) {
-                confirmOpenPurchaseDialog(
-                    preLines, preScaleX, preScaleY, screenWidth, screenHeight,
-                    config, db, preBitmap, targetTab, recognizer
-                )
-                return@withContext
-            }
-        } catch (e: Exception) {
-            BotLogs.addLog("⚠️ Ошибка первичного OCR экрана: ${e.message}")
-        } finally {
-            preBitmap.recycle()
         }
 
         val targetCoords = getTabCoordinates(targetTab, config)
         val altCoords = getTabCoordinates(alternateTab, config)
 
         if (targetCoords == null) {
+            checkModalBeforeSwitch = true
             BotLogs.addLog("⚠️ Вкладка '${targetTab.tabLabel}' не найдена на экране. Включите калибровку в настройках и укажите вкладки вручную.")
             return@withContext
         }
 
-        // Step 2: Switch between Puzzles and Lands in the game to force market refresh
-        val switchStartTime = System.currentTimeMillis()
-        if (config.switchBetweenTabs && altCoords != null) {
-            val rand1 = if (config.tabSwitchRandomizationMs > 0) {
-                Random.nextInt(-config.tabSwitchRandomizationMs, config.tabSwitchRandomizationMs + 1)
-            } else 0
-            val rand2 = if (config.tabSwitchRandomizationMs > 0) {
-                Random.nextInt(-config.tabSwitchRandomizationMs, config.tabSwitchRandomizationMs + 1)
-            } else 0
+        // Step 2: Switch tabs in game using exact user slider timing
+        val randDelta = if (config.tabSwitchRandomizationMs > 0) {
+            Random.nextInt(-config.tabSwitchRandomizationMs, config.tabSwitchRandomizationMs + 1)
+        } else 0
+        val settleDelay = (config.tabSwitchIntervalMs + randDelta).coerceAtLeast(30L)
 
-            val delay1 = (config.tabSwitchIntervalMs + rand1).coerceAtLeast(30L)
-            val delay2 = (config.tabSwitchIntervalMs + rand2).coerceAtLeast(30L)
-
+        if (isMultiTab) {
+            nextMultiTabIndex++
             if (config.verboseOcrLogging) {
-                BotLogs.addLog("🔀 Переключаемся в игре: ${alternateTab.tabLabel} -> ${targetTab.tabLabel}")
+                BotLogs.addLog("🔀 Обе вкладки: переходим на ${targetTab.tabLabel} (${settleDelay} мс)")
+            }
+            clickAtWithRandomization(targetCoords.first, targetCoords.second, config)
+            delay(settleDelay)
+        } else if (config.switchBetweenTabs && altCoords != null) {
+            val bounceDelay = minOf(60L, maxOf(25L, config.tabSwitchIntervalMs / 4))
+            if (config.verboseOcrLogging) {
+                BotLogs.addLog("🔀 Переключаемся в игре: ${alternateTab.tabLabel} (${bounceDelay} мс) -> ${targetTab.tabLabel} (${settleDelay} мс)")
             }
             clickAtWithRandomization(altCoords.first, altCoords.second, config)
-            delay(delay1)
+            delay(bounceDelay)
             clickAtWithRandomization(targetCoords.first, targetCoords.second, config)
-            delay(delay2)
+            delay(settleDelay)
         } else {
             clickAtWithRandomization(targetCoords.first, targetCoords.second, config)
-            delay(config.tabSwitchIntervalMs.coerceAtLeast(50L))
+            delay(settleDelay)
         }
 
-        // Step 3: Capture fresh screenshot on the target tab (ONLY Puzzles or ONLY Lands)
-        val freshBitmap = MediaProjectionHelper.captureFreshScreenshot(
-            minTimestampMs = switchStartTime + 30L,
-            waitTimeoutMs = 280L
-        ) ?: return@withContext
+        // Step 3: Read latest frame immediately after settleDelay (no 280ms stall)
+        val freshBitmap = MediaProjectionHelper.getLatestScreenshot() ?: return@withContext
 
         try {
             val scaleX = screenWidth / freshBitmap.width
@@ -563,31 +585,28 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         recognizer: TextRecognizer,
         tapLotTime: Long
     ): Boolean {
-        BotLogs.addLog("⏳ Ожидаем появление модального окна подтверждения покупки...")
+        BotLogs.addLog("⏳ Ожидаем окно подтверждения покупки...")
         delay(CONFIRMATION_INITIAL_DELAY_MS)
 
         if (config.calibratedConfirmX != -1f && config.calibratedConfirmY != -1f) {
             val calX = config.calibratedConfirmX
             val calY = config.calibratedConfirmY
-            BotLogs.addLog("🎯 [КАЛИБРОВКА] Кликаем сохранённую кнопку подтверждения в (${calX.toInt()}, ${calY.toInt()})")
+            BotLogs.addLog("🎯 [КАЛИБРОВКА] Кликаем кнопку Buy в (${calX.toInt()}, ${calY.toInt()})")
             val confirmTapTime = System.currentTimeMillis()
-            dispatchClickSuspend(calX, calY)
+            dispatchClickSuspend(calX, calY, durationMs = 65L)
             return verifyPurchaseResultAndHandleFailure(
                 targetTab, price, qty, config, screenWidth, screenHeight, density, db, recognizer,
                 lastClickX = calX, lastClickY = calY, confirmTapTime = confirmTapTime
             )
         }
 
-        // Poll fresh screenshots until the confirmation modal finishes rendering (up to ~1.4s)
         var detectedButton: Pair<Pair<Float, Float>, String>? = null
         var modalSeenOnScreen = false
-        var lastModalDebugText = ""
 
-        for (attempt in 1..6) {
-            val minTs = if (attempt == 1) tapLotTime + 50L else System.currentTimeMillis() - 30L
+        for (attempt in 1..2) {
             val dialogBitmap = MediaProjectionHelper.captureFreshScreenshot(
-                minTimestampMs = minTs,
-                waitTimeoutMs = 240L
+                minTimestampMs = if (attempt == 1) tapLotTime + 30L else System.currentTimeMillis() - 20L,
+                waitTimeoutMs = 190L
             )
             if (dialogBitmap != null) {
                 try {
@@ -598,31 +617,28 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                         !isInsideOverlay(line.boundingBox, screenWidth, screenHeight, density, scaleX, scaleY) &&
                             !isLogOrOverlayText(line.text)
                     }
-                    lastModalDebugText = lines.joinToString(" | ") { it.text }.take(140)
 
                     if (handleTryThroughDialogIfNeeded(lines, scaleX, scaleY, screenWidth, screenHeight, config)) {
+                        checkModalBeforeSwitch = true
                         return false
                     }
                     if (dismissSystemDialogIfNeeded(lines, scaleX, scaleY, screenWidth, screenHeight, config)) {
+                        checkModalBeforeSwitch = true
                         return false
                     }
 
                     val modalOpen = isConfirmationDialogShowing(lines, scaleX, scaleY, screenWidth, screenHeight)
-                    val marketCovered = attempt >= 2 && !isMarketListShowing(lines, scaleY, screenHeight)
                     val buttonMatch = findBuyButtonCoordinates(
-                        dialogBitmap, lines, scaleX, scaleY, screenWidth, screenHeight, config, allowCache = false
+                        dialogBitmap, lines, scaleX, scaleY, screenWidth, screenHeight, config, allowCache = true
                     )
 
-                    if (buttonMatch != null && (modalOpen || marketCovered || buttonMatch.second.startsWith("OCR") || attempt >= 2)) {
+                    if (buttonMatch != null) {
                         detectedButton = buttonMatch
                         modalSeenOnScreen = true
                         break
-                    } else if (modalOpen || marketCovered) {
+                    } else if (modalOpen) {
                         modalSeenOnScreen = true
-                        if (attempt >= 3) {
-                            detectedButton = buttonMatch
-                            break
-                        }
+                        if (attempt == 2) break
                     }
                 } catch (e: Exception) {
                     BotLogs.addLog("⚠️ Ошибка OCR модального окна: ${e.message}")
@@ -630,20 +646,18 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     dialogBitmap.recycle()
                 }
             }
-            delay(130L)
+            if (attempt == 1) delay(90L)
         }
 
         if (!modalSeenOnScreen && detectedButton == null) {
-            BotLogs.addLog("⚠️ [ПОДТВЕРЖДЕНИЕ] Окно покупки не появилось (OCR: $lastModalDebugText)")
+            checkModalBeforeSwitch = true
+            BotLogs.addLog("⚠️ [ПОДТВЕРЖДЕНИЕ] Окно покупки не появилось.")
             return false
         }
 
-        // Brief settle delay so WebView CSS transition finishes before clicking Buy
-        delay(140L)
-
         val (coords, source) = detectedButton ?: run {
             val fallback = (cachedBuyX ?: (screenWidth * 0.50f)) to (cachedBuyY ?: (screenHeight * 0.748f))
-            val label = if (cachedBuyX != null && cachedBuyY != null) "Кэш" else "Центр Buy (геометрия)"
+            val label = if (cachedBuyX != null && cachedBuyY != null) "Кэш" else "Центр Buy"
             fallback to label
         }
 
@@ -656,10 +670,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
 
         BotLogs.addLog("⚡ [ПОДТВЕРЖДЕНИЕ] Кликаем [$source] в (${buyClickX.toInt()}, ${buyClickY.toInt()})")
         val confirmTapTime = System.currentTimeMillis()
-        val tapOk = dispatchClickSuspend(buyClickX, buyClickY, durationMs = 70L)
-        if (!tapOk) {
-            BotLogs.addLog("⚠️ Жест подтверждения не подтверждён системой — проверяем экран и пробуем повторно...")
-        }
+        dispatchClickSuspend(buyClickX, buyClickY, durationMs = 65L)
 
         return verifyPurchaseResultAndHandleFailure(
             targetTab, price, qty, config, screenWidth, screenHeight, density, db, recognizer,
@@ -683,7 +694,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         val found = findBuyButtonCoordinates(
             bitmap, lines, scaleX, scaleY, screenWidth, screenHeight, config, allowCache = true
         )
-        val (coords, source) = found ?: ((screenWidth * 0.50f to screenHeight * 0.748f) to "Центр Buy (геометрия)")
+        val (coords, source) = found ?: ((screenWidth * 0.50f to screenHeight * 0.748f) to "Центр Buy")
 
         if (source.startsWith("OCR") || source == "OpenCV") {
             cachedBuyX = coords.first
@@ -692,7 +703,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
 
         BotLogs.addLog("🎯 [ОТКРЫТОЕ ОКНО ПОКУПКИ] Кликаем [$source] в (${coords.first.toInt()}, ${coords.second.toInt()})")
         val confirmTapTime = System.currentTimeMillis()
-        dispatchClickSuspend(coords.first, coords.second, durationMs = 70L)
+        dispatchClickSuspend(coords.first, coords.second, durationMs = 65L)
 
         return verifyPurchaseResultAndHandleFailure(
             targetTab, detectedPrice, 1.0, config, screenWidth, screenHeight,
@@ -718,13 +729,12 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         var prevX = lastClickX
         var prevY = lastClickY
         var tapTimestamp = confirmTapTime
-        var absentModalCount = 0
 
-        for (attempt in 1..5) {
-            delay(360L)
+        for (attempt in 1..3) {
+            delay(280L)
             val verifyBitmap = MediaProjectionHelper.captureFreshScreenshot(
-                minTimestampMs = tapTimestamp + 60L,
-                waitTimeoutMs = 380L
+                minTimestampMs = tapTimestamp + 40L,
+                waitTimeoutMs = 260L
             ) ?: continue
 
             var shouldReturnFalse = false
@@ -741,70 +751,42 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                         !isLogOrOverlayText(line.text)
                 }
 
-                // 1. Rate-limit popup -> close and retry later without cooldown
                 if (handleTryThroughDialogIfNeeded(lines, scaleX, scaleY, screenWidth, screenHeight, config)) {
                     cooldownUntilMillis = 0L
                     shouldReturnFalse = true
                 } else if (isAlreadyPurchasedDialog(lines)) {
-                    // 2. "Already purchased" popup -> dismiss and clear cooldown
                     dismissSystemDialogIfNeeded(lines, scaleX, scaleY, screenWidth, screenHeight, config)
                     BotLogs.addLog("⚠️ [ОШИБКА ПОКУПКИ] Лот уже куплен другим игроком. Кулдаун сброшен.")
                     cooldownUntilMillis = 0L
                     shouldReturnFalse = true
                 } else if (isMailMarketBuyOfferDialog(lines)) {
-                    // 3. Explicit success popup ("Mail / Market buy offer") -> dismiss and record purchase
                     dismissSystemDialogIfNeeded(lines, scaleX, scaleY, screenWidth, screenHeight, config)
                     recordConfirmedPurchase(targetTab, price, qty, db)
                     shouldReturnTrue = true
-                } else if (isConfirmationDialogShowing(lines, scaleX, scaleY, screenWidth, screenHeight) ||
-                    !isMarketListShowing(lines, scaleY, screenHeight)
-                ) {
-                    // 4. Confirmation modal is STILL open (or market list is still covered by modal)!
-                    val stillConfirm = isConfirmationDialogShowing(lines, scaleX, scaleY, screenWidth, screenHeight)
-                    if (!stillConfirm) {
-                        absentModalCount++
-                    } else {
-                        absentModalCount = 0
-                    }
-
-                    if (stillConfirm || absentModalCount < 2) {
-                        cachedBuyX = null
-                        cachedBuyY = null
-
-                        val found = findBuyButtonCoordinates(
-                            verifyBitmap, lines, scaleX, scaleY, screenWidth, screenHeight,
-                            config.copy(calibratedConfirmX = -1f, calibratedConfirmY = -1f),
-                            allowCache = false
-                        )
-                        if (found != null) {
-                            var candidateX = found.first.first
-                            var candidateY = found.first.second
-                            if (!found.second.startsWith("OCR") &&
-                                abs(candidateX - prevX) < 12f && abs(candidateY - prevY) < 12f
-                            ) {
-                                val nudge = when (attempt) {
-                                    1 -> -screenHeight * 0.03f
-                                    2 -> screenHeight * 0.03f
-                                    else -> -screenHeight * 0.06f
-                                }
-                                candidateY = (candidateY + nudge).coerceIn(screenHeight * 0.55f, screenHeight * 0.88f)
-                            }
-                            retryCoords = candidateX to candidateY
-                            retrySource = found.second
-                        } else {
-                            val targetY = if (attempt == 1) screenHeight * 0.748f else {
-                                val nudge = if (attempt % 2 == 0) -screenHeight * 0.035f else screenHeight * 0.035f
-                                (prevY + nudge).coerceIn(screenHeight * 0.58f, screenHeight * 0.86f)
-                            }
-                            retryCoords = (screenWidth * 0.50f) to targetY
-                            retrySource = "Центр Buy"
+                } else if (isConfirmationDialogShowing(lines, scaleX, scaleY, screenWidth, screenHeight)) {
+                    cachedBuyX = null
+                    cachedBuyY = null
+                    val found = findBuyButtonCoordinates(
+                        verifyBitmap, lines, scaleX, scaleY, screenWidth, screenHeight,
+                        config.copy(calibratedConfirmX = -1f, calibratedConfirmY = -1f),
+                        allowCache = false
+                    )
+                    if (found != null) {
+                        var candidateX = found.first.first
+                        var candidateY = found.first.second
+                        if (!found.second.startsWith("OCR") &&
+                            abs(candidateX - prevX) < 12f && abs(candidateY - prevY) < 12f
+                        ) {
+                            candidateY = (candidateY + if (attempt == 1) -screenHeight * 0.03f else screenHeight * 0.03f)
+                                .coerceIn(screenHeight * 0.55f, screenHeight * 0.88f)
                         }
+                        retryCoords = candidateX to candidateY
+                        retrySource = found.second
                     } else {
-                        recordConfirmedPurchase(targetTab, price, qty, db)
-                        shouldReturnTrue = true
+                        retryCoords = (screenWidth * 0.50f) to (screenHeight * 0.748f)
+                        retrySource = "Центр Buy"
                     }
-                } else {
-                    // 5. Market list (Puzzles/Lands/Showed) is clearly visible again -> modal closed, purchase succeeded!
+                } else if (isMarketListShowing(lines, scaleY, screenHeight)) {
                     recordConfirmedPurchase(targetTab, price, qty, db)
                     shouldReturnTrue = true
                 }
@@ -814,24 +796,27 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                 verifyBitmap.recycle()
             }
 
-            if (shouldReturnFalse) return false
-            if (shouldReturnTrue) return true
+            if (shouldReturnFalse) {
+                checkModalBeforeSwitch = true
+                return false
+            }
+            if (shouldReturnTrue) {
+                checkModalBeforeSwitch = false
+                return true
+            }
 
             if (retryCoords != null) {
                 prevX = retryCoords.first
                 prevY = retryCoords.second
-                if (retrySource.startsWith("OCR") || retrySource == "OpenCV") {
-                    cachedBuyX = prevX
-                    cachedBuyY = prevY
-                }
-                BotLogs.addLog("🔄 [ПОВТОР $attempt/5] Окно подтверждения ещё открыто — кликаем [$retrySource] в (${prevX.toInt()}, ${prevY.toInt()})")
+                BotLogs.addLog("🔄 [ПОВТОР $attempt/3] Кликаем [$retrySource] в (${prevX.toInt()}, ${prevY.toInt()})")
                 tapTimestamp = System.currentTimeMillis()
-                dispatchClickSuspend(prevX, prevY, durationMs = 70L)
+                dispatchClickSuspend(prevX, prevY, durationMs = 65L)
             }
         }
 
         cachedBuyX = null
         cachedBuyY = null
+        checkModalBeforeSwitch = true
         BotLogs.addLog("❌ [ПОДТВЕРЖДЕНИЕ] Окно подтверждения не закрылось. Кулдаун НЕ ставим.")
         return false
     }

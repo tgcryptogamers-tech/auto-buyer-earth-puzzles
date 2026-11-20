@@ -39,4 +39,19 @@ class ExampleRobolectricTest {
         assertTrue(ScreenshotOcrAnalyzer.evaluateThreshold(95.5, cfg))
         assertFalse(ScreenshotOcrAnalyzer.evaluateThreshold(120.0, cfg))
     }
+
+    @Test
+    fun `activeBuyTabs supports puzzles only, lands only, and both tabs`() {
+        val puzzlesOnly = AppConfiguration(buyPuzzles = true, buyLands = false)
+        assertEquals(listOf(MarketTab.PUZZLES), puzzlesOnly.activeBuyTabs())
+        assertEquals("Только Puzzles", puzzlesOnly.buyTargetSummary())
+
+        val landsOnly = AppConfiguration(buyPuzzles = false, buyLands = true)
+        assertEquals(listOf(MarketTab.LANDS), landsOnly.activeBuyTabs())
+        assertEquals("Только Lands", landsOnly.buyTargetSummary())
+
+        val both = AppConfiguration(buyPuzzles = true, buyLands = true)
+        assertEquals(listOf(MarketTab.PUZZLES, MarketTab.LANDS), both.activeBuyTabs())
+        assertEquals("Puzzles + Lands", both.buyTargetSummary())
+    }
 }

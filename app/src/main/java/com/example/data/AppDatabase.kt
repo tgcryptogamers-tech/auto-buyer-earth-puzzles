@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [AppConfiguration::class, PurchaseRecord::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +26,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE app_configuration ADD COLUMN buyPuzzles INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE app_configuration ADD COLUMN buyLands INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "UPDATE app_configuration SET " +
+                        "buyPuzzles = CASE WHEN buyTarget = 'Lands' THEN 0 ELSE 1 END, " +
+                        "buyLands = CASE WHEN buyTarget = 'Lands' THEN 1 ELSE 0 END"
+                )
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -33,7 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "earth_puzzles_bot_db"
                 )
-                    .addMigrations(MIGRATION_2_3)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance
