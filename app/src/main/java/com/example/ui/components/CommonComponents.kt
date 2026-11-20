@@ -1,0 +1,308 @@
+package com.example.ui.components
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Landscape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.example.data.MarketTab
+
+@Composable
+fun SectionCard(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+fun BuyTargetSelector(
+    selectedTarget: MarketTab,
+    onSelectTarget: (MarketTab) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        TargetOptionChip(
+            tab = MarketTab.PUZZLES,
+            title = "Только Puzzles",
+            subtitle = "Пазлы земли",
+            selected = selectedTarget == MarketTab.PUZZLES,
+            onClick = { onSelectTarget(MarketTab.PUZZLES) },
+            modifier = Modifier
+                .weight(1f)
+                .testTag("select_buy_puzzles")
+        )
+        TargetOptionChip(
+            tab = MarketTab.LANDS,
+            title = "Только Lands",
+            subtitle = "Участки земли",
+            selected = selectedTarget == MarketTab.LANDS,
+            onClick = { onSelectTarget(MarketTab.LANDS) },
+            modifier = Modifier
+                .weight(1f)
+                .testTag("select_buy_lands")
+        )
+    }
+}
+
+@Composable
+private fun TargetOptionChip(
+    tab: MarketTab,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val bgColor by animateColorAsState(
+        targetValue = if (selected) {
+            if (tab == MarketTab.PUZZLES) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.secondaryContainer
+            }
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "targetBg"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (selected) {
+            if (tab == MarketTab.PUZZLES) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.secondary
+            }
+        } else {
+            MaterialTheme.colorScheme.outlineVariant
+        },
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "targetBorder"
+    )
+
+    Surface(
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.medium,
+        color = bgColor,
+        border = BorderStroke(if (selected) 2.dp else 1.dp, borderColor)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (tab == MarketTab.PUZZLES) Icons.Default.Extension else Icons.Default.Landscape,
+                contentDescription = tab.tabLabel,
+                tint = if (selected) {
+                    if (tab == MarketTab.PUZZLES) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.secondary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (selected) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Выбрано",
+                    tint = if (tab == MarketTab.PUZZLES) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.secondary
+                    },
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun MarketTabsStripPreview(
+    activeTab: MarketTab,
+    buyTarget: MarketTab,
+    switchBetweenTabs: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Вкладки рынка MoneyMining",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = if (switchBetweenTabs) "Puzzles ↔ Lands" else "Фикс: ${buyTarget.tabLabel}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            MarketStripTabItem(
+                label = "Puzzles",
+                isActive = activeTab == MarketTab.PUZZLES,
+                isTarget = buyTarget == MarketTab.PUZZLES,
+                modifier = Modifier.weight(1f)
+            )
+            MarketStripTabItem(
+                label = "Lands",
+                isActive = activeTab == MarketTab.LANDS,
+                isTarget = buyTarget == MarketTab.LANDS,
+                modifier = Modifier.weight(1f)
+            )
+            MarketStripTabItem(
+                label = "Bricks",
+                isActive = false,
+                isTarget = false,
+                enabled = false,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun MarketStripTabItem(
+    label: String,
+    isActive: Boolean,
+    isTarget: Boolean,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    val brush = if (isActive) {
+        Brush.horizontalGradient(
+            listOf(
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                MaterialTheme.colorScheme.primaryContainer
+            )
+        )
+    } else {
+        Brush.horizontalGradient(
+            listOf(
+                MaterialTheme.colorScheme.surface,
+                MaterialTheme.colorScheme.surface
+            )
+        )
+    }
+
+    Box(
+        modifier = modifier
+            .height(44.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(brush),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (isTarget) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.secondary)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = when {
+                    !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                    isActive -> MaterialTheme.colorScheme.secondary
+                    else -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.78f)
+                }
+            )
+        }
+    }
+}

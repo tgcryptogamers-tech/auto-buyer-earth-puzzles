@@ -1,0 +1,6 @@
+{
+  "name": "Earth Puzzles",
+  "description": "Market monitor and configuration companion for MoneyMining Puzzles and Lands tabs with OCR screenshot analysis and cycle scheduling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
