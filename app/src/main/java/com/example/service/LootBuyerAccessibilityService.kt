@@ -67,9 +67,12 @@ class LootBuyerAccessibilityService : AccessibilityService() {
     @Volatile private var lastHeartbeatLogTime = 0L
     @Volatile private var nextMultiTabIndex = 0
     @Volatile private var checkModalBeforeSwitch = true
+    private val sharedRecognizer: TextRecognizer by lazy {
+        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    }
 
     companion object {
-        const val CONFIRMATION_INITIAL_DELAY_MS = 180L
+        const val CONFIRMATION_INITIAL_DELAY_MS = 130L
 
         @Volatile
         var instance: LootBuyerAccessibilityService? = null
@@ -167,8 +170,12 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                         cycleInitialized = false
                     }
 
-                    performOcrScreenScan(config, db)
-                    delay(config.scanIntervalMs.coerceAtLeast(30L))
+                    val didSwitch = performOcrScreenScan(config, db)
+                    if (didSwitch) {
+                        if (config.scanIntervalMs > 0L) delay(config.scanIntervalMs)
+                    } else {
+                        delay(config.scanIntervalMs.coerceAtLeast(30L))
+                    }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -262,8 +269,8 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         }
     }
 
-    private suspend fun performOcrScreenScan(config: AppConfiguration, db: AppDatabase) = withContext(Dispatchers.Default) {
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private suspend fun performOcrScreenScan(config: AppConfiguration, db: AppDatabase): Boolean = withContext(Dispatchers.Default) {
+        val recognizer = sharedRecognizer
 
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
@@ -295,7 +302,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             val preBitmap = MediaProjectionHelper.getLatestScreenshot()
             if (preBitmap == null) {
                 BotLogs.addLog("🔍 [ОЖИДАНИЕ] Включите захват экрана (Screen Capture) и откройте рынок в игре.")
-                return@withContext
+                return@withContext false
             }
 
             try {
@@ -311,18 +318,18 @@ class LootBuyerAccessibilityService : AccessibilityService() {
 
                 if (handleTryThroughDialogIfNeeded(preLines, preScaleX, preScaleY, screenWidth, screenHeight, config)) {
                     checkModalBeforeSwitch = true
-                    return@withContext
+                    return@withContext false
                 }
                 if (dismissSystemDialogIfNeeded(preLines, preScaleX, preScaleY, screenWidth, screenHeight, config)) {
                     checkModalBeforeSwitch = true
-                    return@withContext
+                    return@withContext false
                 }
                 if (config.enableActualBuying && isConfirmationDialogShowing(preLines, preScaleX, preScaleY, screenWidth, screenHeight)) {
                     confirmOpenPurchaseDialog(
                         preLines, preScaleX, preScaleY, screenWidth, screenHeight,
                         config, db, preBitmap, targetTab, recognizer
                     )
-                    return@withContext
+                    return@withContext false
                 }
                 checkModalBeforeSwitch = false
             } catch (e: Exception) {
@@ -338,14 +345,15 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         if (targetCoords == null) {
             checkModalBeforeSwitch = true
             BotLogs.addLog("⚠️ Вкладка '${targetTab.tabLabel}' не найдена на экране. Включите калибровку в настройках и укажите вкладки вручную.")
-            return@withContext
+            return@withContext false
         }
 
         // Step 2: Switch tabs in game using exact user slider timing
         val randDelta = if (config.tabSwitchRandomizationMs > 0) {
             Random.nextInt(-config.tabSwitchRandomizationMs, config.tabSwitchRandomizationMs + 1)
         } else 0
-        val settleDelay = (config.tabSwitchIntervalMs + randDelta).coerceAtLeast(30L)
+        val settleDelay = (config.tabSwitchIntervalMs + randDelta).coerceAtLeast(20L)
+        val switchedTabs = isMultiTab || (config.switchBetweenTabs && altCoords != null)
 
         if (isMultiTab) {
             nextMultiTabIndex++
@@ -355,7 +363,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             clickAtWithRandomization(targetCoords.first, targetCoords.second, config)
             delay(settleDelay)
         } else if (config.switchBetweenTabs && altCoords != null) {
-            val bounceDelay = minOf(60L, maxOf(25L, config.tabSwitchIntervalMs / 4))
+            val bounceDelay = minOf(45L, maxOf(24L, config.tabSwitchIntervalMs / 4))
             if (config.verboseOcrLogging) {
                 BotLogs.addLog("🔀 Переключаемся в игре: ${alternateTab.tabLabel} (${bounceDelay} мс) -> ${targetTab.tabLabel} (${settleDelay} мс)")
             }
@@ -368,26 +376,50 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             delay(settleDelay)
         }
 
-        // Step 3: Read latest frame immediately after settleDelay (no 280ms stall)
-        val freshBitmap = MediaProjectionHelper.getLatestScreenshot() ?: return@withContext
+        // Step 3: Read latest frame immediately and crop strictly to the market listing band (44%..91%)
+        // to cut ML Kit OCR latency more than in half.
+        val freshBitmap = MediaProjectionHelper.getLatestScreenshot() ?: return@withContext switchedTabs
 
         try {
             val scaleX = screenWidth / freshBitmap.width
             val scaleY = screenHeight / freshBitmap.height
-            val result = Tasks.await(recognizer.process(InputImage.fromBitmap(freshBitmap, 0)))
+            val cropTop = (freshBitmap.height * 0.44f).toInt().coerceIn(0, freshBitmap.height - 1)
+            val cropBottom = (freshBitmap.height * 0.91f).toInt().coerceIn(cropTop + 1, freshBitmap.height)
+            val scanBitmap = try {
+                Bitmap.createBitmap(freshBitmap, 0, cropTop, freshBitmap.width, cropBottom - cropTop)
+            } catch (_: Exception) {
+                freshBitmap
+            }
+
+            val result = try {
+                Tasks.await(recognizer.process(InputImage.fromBitmap(scanBitmap, 0)))
+            } finally {
+                if (scanBitmap !== freshBitmap) scanBitmap.recycle()
+            }
 
             val allLines = result.textBlocks.flatMap { it.lines }
+            if (cropTop > 0 && scanBitmap !== freshBitmap) {
+                for (line in allLines) {
+                    line.boundingBox?.offset(0, cropTop)
+                    for (elem in line.elements) {
+                        elem.boundingBox?.offset(0, cropTop)
+                    }
+                }
+            }
+
             val filteredLines = allLines.filter { line ->
                 !isInsideOverlay(line.boundingBox, screenWidth, screenHeight, density, scaleX, scaleY) &&
                     !isLogOrOverlayText(line.text)
             }
 
             if (handleTryThroughDialogIfNeeded(filteredLines, scaleX, scaleY, screenWidth, screenHeight, config)) {
-                return@withContext
+                checkModalBeforeSwitch = true
+                return@withContext switchedTabs
             }
 
             if (dismissSystemDialogIfNeeded(filteredLines, scaleX, scaleY, screenWidth, screenHeight, config)) {
-                return@withContext
+                checkModalBeforeSwitch = true
+                return@withContext switchedTabs
             }
 
             if (config.enableActualBuying && isConfirmationDialogShowing(filteredLines, scaleX, scaleY, screenWidth, screenHeight)) {
@@ -395,17 +427,16 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     filteredLines, scaleX, scaleY, screenWidth, screenHeight,
                     config, db, freshBitmap, targetTab, recognizer
                 )
-                return@withContext
+                return@withContext switchedTabs
             }
 
             if (config.verboseOcrLogging) {
                 BotLogs.addLog("👁️ [${targetTab.tabLabel}] Строк OCR: ${filteredLines.size}")
             }
 
-            val visionLotCards = try {
-                OpenCvVisionEngine.findLotCards(freshBitmap, screenWidth, screenHeight)
-            } catch (_: Exception) {
-                emptyList()
+            val hasEmptyShowedBanner = filteredLines.any {
+                val t = it.text.lowercase()
+                t.contains("showed") && (t.contains("0 from 0") || t.contains("from 0"))
             }
 
             // Group listing lines into horizontal rows (46%..90% of screen height)
@@ -416,16 +447,17 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                 val bounds = line.boundingBox ?: return@filter false
                 val centerY = bounds.centerY().toFloat()
                 val lineText = line.text.lowercase().trim()
+                if (lineText.contains("showed") || lineText.contains("from") ||
+                    lineText.contains("market") || lineText.contains("kingdom")
+                ) {
+                    return@filter false
+                }
                 val extracted = ScreenshotOcrAnalyzer.extractPrice(line.text)
-
-                val isPureHeader = (lineText.contains("showed") || lineText.contains("from") ||
-                    lineText.contains("market") || lineText.contains("kingdom")) && extracted == null
-
-                centerY in listingsTopLimit..listingsBottomLimit && !isPureHeader &&
+                centerY in listingsTopLimit..listingsBottomLimit &&
                     (extracted != null || line.text.any { it.isDigit() })
             }
 
-            val tolerance = 65f
+            val tolerance = (freshBitmap.height * 0.045f).coerceAtLeast(36f)
             val horizontalRows = mutableListOf<MutableList<Text.Line>>()
             for (line in listingLines) {
                 val centerY = line.boundingBox?.centerY()?.toFloat() ?: continue
@@ -447,7 +479,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     if (v != null) Pair(v, line.boundingBox) else null
                 }
                 val pricePair = numberPairs.maxByOrNull { it.second?.centerX() ?: 0 }
-                if (pricePair != null && (pricePair.second?.left ?: 0) >= freshBitmap.width * 0.35f) {
+                if (pricePair != null && (pricePair.second?.centerX() ?: 0) >= freshBitmap.width * 0.40f) {
                     val qty = numberPairs.firstOrNull { it != pricePair }?.first ?: 1.0
                     currentScreenLots.add(pricePair.first to qty)
                 }
@@ -459,7 +491,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     BotLogs.addLog("⚠️ [ЗАВИСАНИЕ] Лот $attemptedPrice всё ещё на рынке — перезагружаем страницу...")
                     isStuckCheckPending = false
                     restartGameByReloadPage()
-                    return@withContext
+                    return@withContext switchedTabs
                 }
                 isStuckCheckPending = false
             }
@@ -473,8 +505,8 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                 if (numberPairs.isEmpty()) continue
 
                 val pricePair = numberPairs.maxByOrNull { it.second?.centerX() ?: 0 } ?: continue
-                val leftCoord = pricePair.second?.left ?: 0
-                if (leftCoord < freshBitmap.width * 0.35f) continue
+                val centerXCoord = pricePair.second?.centerX() ?: 0
+                if (centerXCoord < freshBitmap.width * 0.40f) continue
 
                 val price = pricePair.first
                 val qty = numberPairs.firstOrNull { it != pricePair }?.first ?: 1.0
@@ -512,8 +544,13 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // Stage 2: OpenCV isolated price ROI fallback
-            if (foundLotsCount == 0 && visionLotCards.isNotEmpty()) {
+            // Stage 2: OpenCV isolated price ROI fallback (skipped when Showed explicitly says 0 lots)
+            if (foundLotsCount == 0 && !hasEmptyShowedBanner) {
+                val visionLotCards = try {
+                    OpenCvVisionEngine.findLotCards(freshBitmap, screenWidth, screenHeight)
+                } catch (_: Exception) {
+                    emptyList()
+                }
                 for (card in visionLotCards) {
                     val pRect = card.priceCropRect
                     if (pRect.width() <= 10 || pRect.height() <= 10) continue
@@ -568,6 +605,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     BotLogs.addLog("🔎 [${targetTab.tabLabel}] Скан выполнен: подходящих лотов на экране нет (порог ${config.priceThreshold})")
                 }
             }
+            switchedTabs
         } finally {
             freshBitmap.recycle()
         }
@@ -605,8 +643,8 @@ class LootBuyerAccessibilityService : AccessibilityService() {
 
         for (attempt in 1..2) {
             val dialogBitmap = MediaProjectionHelper.captureFreshScreenshot(
-                minTimestampMs = if (attempt == 1) tapLotTime + 30L else System.currentTimeMillis() - 20L,
-                waitTimeoutMs = 190L
+                minTimestampMs = if (attempt == 1) tapLotTime + 20L else System.currentTimeMillis() - 15L,
+                waitTimeoutMs = 140L
             )
             if (dialogBitmap != null) {
                 try {
@@ -646,7 +684,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     dialogBitmap.recycle()
                 }
             }
-            if (attempt == 1) delay(90L)
+            if (attempt == 1) delay(60L)
         }
 
         if (!modalSeenOnScreen && detectedButton == null) {
@@ -1138,12 +1176,12 @@ class LootBuyerAccessibilityService : AccessibilityService() {
     fun clickAt(x: Float, y: Float) {
         val path = Path().apply { moveTo(x, y) }
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0L, 45L))
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 16L))
             .build()
         dispatchGesture(gesture, null, null)
     }
 
-    private suspend fun dispatchClickSuspend(x: Float, y: Float, durationMs: Long = 55L): Boolean {
+    private suspend fun dispatchClickSuspend(x: Float, y: Float, durationMs: Long = 35L): Boolean {
         val path = Path().apply { moveTo(x.coerceAtLeast(1f), y.coerceAtLeast(1f)) }
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0L, durationMs))

@@ -193,6 +193,10 @@ object ScreenshotOcrAnalyzer {
                 .replace(',', '.')
                 .replace('\'', '.')
 
+            cleaned = cleaned
+                .replace(Regex("(?<=\\d)\\s+(?=\\.)"), "")
+                .replace(Regex("(?<=\\.)\\s+(?=\\d)"), "")
+
             if (cleaned.count { it == '.' } > 1) {
                 val firstDot = cleaned.indexOf('.')
                 cleaned = cleaned.substring(0, firstDot + 1) +
@@ -210,7 +214,7 @@ object ScreenshotOcrAnalyzer {
             val pattern = Pattern.compile("(\\d+(?:\\.\\d+)?)")
             val matcher = pattern.matcher(cleaned)
             if (matcher.find()) {
-                matcher.group(1)?.toDoubleOrNull()
+                matcher.group(1)?.toDoubleOrNull()?.takeIf { it > 0.00001 }
             } else {
                 null
             }

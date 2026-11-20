@@ -65,10 +65,10 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     var tabSwitchSlider by remember(config.tabSwitchIntervalMs) {
-        mutableFloatStateOf(config.tabSwitchIntervalMs.toFloat().coerceIn(30f, 1500f))
+        mutableFloatStateOf(config.tabSwitchIntervalMs.toFloat().coerceIn(20f, 1500f))
     }
     var scanIntervalSlider by remember(config.scanIntervalMs) {
-        mutableFloatStateOf(config.scanIntervalMs.toFloat().coerceIn(30f, 2000f))
+        mutableFloatStateOf(config.scanIntervalMs.toFloat().coerceIn(0f, 1500f))
     }
 
     var thresholdInput by remember(config.priceThreshold) {
@@ -352,7 +352,7 @@ fun SettingsScreen(
 
                     Column {
                         Text(
-                            text = "Задержка переключения вкладок: ${tabSwitchSlider.toLong()} мс",
+                            text = "Задержка после переключения вкладки: ${tabSwitchSlider.toLong()} мс",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -360,17 +360,17 @@ fun SettingsScreen(
                             value = tabSwitchSlider,
                             onValueChange = { v -> tabSwitchSlider = v },
                             onValueChangeFinished = {
-                                val ms = tabSwitchSlider.toLong().coerceIn(30L, 1500L)
+                                val ms = tabSwitchSlider.toLong().coerceIn(20L, 1500L)
                                 onUpdateConfig { it.copy(tabSwitchIntervalMs = ms) }
                             },
-                            valueRange = 30f..1500f,
+                            valueRange = 20f..1500f,
                             modifier = Modifier.testTag("settings_tab_switch_slider")
                         )
                     }
 
                     Column {
                         Text(
-                            text = "Интервал сканирования экрана: ${scanIntervalSlider.toLong()} мс",
+                            text = "Доп. пауза между циклами: ${scanIntervalSlider.toLong()} мс",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -378,10 +378,10 @@ fun SettingsScreen(
                             value = scanIntervalSlider,
                             onValueChange = { v -> scanIntervalSlider = v },
                             onValueChangeFinished = {
-                                val ms = scanIntervalSlider.toLong().coerceIn(30L, 2000L)
+                                val ms = scanIntervalSlider.toLong().coerceIn(0L, 1500L)
                                 onUpdateConfig { it.copy(scanIntervalMs = ms) }
                             },
-                            valueRange = 30f..2000f,
+                            valueRange = 0f..1500f,
                             modifier = Modifier.testTag("settings_scan_interval_slider")
                         )
                     }
