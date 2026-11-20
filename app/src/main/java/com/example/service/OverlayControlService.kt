@@ -602,7 +602,7 @@ class OverlayControlService : Service() {
         }
 
         val stepText = TextView(this).apply {
-            text = "Шаг 1 из 2: Нажмите на вкладку 'Puzzles' в игре"
+            text = "Шаг 1 из 3: Нажмите на вкладку 'Puzzles' в игре"
             setTextColor(Color.parseColor("#F5C443"))
             textSize = 15f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -610,14 +610,37 @@ class OverlayControlService : Service() {
         }
         box.addView(stepText)
 
+        val actionsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+
+        val skipBtn = Button(this).apply {
+            text = "Автопоиск (пропустить)"
+            setBackgroundColor(Color.parseColor("#144D31"))
+            setTextColor(Color.WHITE)
+            visibility = View.GONE
+            setOnClickListener {
+                saveCalibrationCoords(confirmX = -1f, confirmY = -1f)
+            }
+        }
+        actionsRow.addView(
+            skipBtn,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                rightMargin = 16
+            }
+        )
+
         val cancelBtn = Button(this).apply {
             text = "Отмена"
             setBackgroundColor(Color.parseColor("#C62828"))
             setTextColor(Color.WHITE)
             setOnClickListener { disableCalibrationInDb() }
         }
+        actionsRow.addView(cancelBtn)
+
         box.addView(
-            cancelBtn,
+            actionsRow,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = 16
             }
@@ -635,7 +658,7 @@ class OverlayControlService : Service() {
 
         overlay.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                handleCalibrationTap(event.rawX, event.rawY, stepText)
+                handleCalibrationTap(event.rawX, event.rawY, stepText, skipBtn)
             }
             true
         }
@@ -644,43 +667,60 @@ class OverlayControlService : Service() {
         calibrationOverlay = overlay
     }
 
-    private fun handleCalibrationTap(x: Float, y: Float, stepView: TextView) {
+    private fun handleCalibrationTap(x: Float, y: Float, stepView: TextView, skipBtn: Button) {
         val now = System.currentTimeMillis()
         if (now - lastTapTime < 450) return
         lastTapTime = now
 
         LootBuyerAccessibilityService.instance?.clickAt(x, y)
 
-        if (calibrationStep == 1) {
-            tempPuzzlesX = x
-            tempPuzzlesY = y
-            calibrationStep = 2
-            stepView.text = "Шаг 2 из 2: Нажмите на вкладку 'Lands' в игре"
-            BotLogs.addLog("📍 Сохранена вкладка Puzzles: (${x.toInt()}, ${y.toInt()})")
-        } else {
-            tempLandsX = x
-            tempLandsY = y
-            BotLogs.addLog("📍 Сохранена вкладка Lands: (${x.toInt()}, ${y.toInt()}). Калибровка завершена!")
-            serviceScope.launch {
-                val db = AppDatabase.getDatabase(applicationContext)
-                val current = db.configurationDao().getConfiguration() ?: AppConfiguration()
-                db.configurationDao().saveConfiguration(
-                    current.copy(
-                        isCalibrationEnabled = false,
-                        calibratedPuzzlesX = tempPuzzlesX,
-                        calibratedPuzzlesY = tempPuzzlesY,
-                        calibratedLandsX = tempLandsX,
-                        calibratedLandsY = tempLandsY
-                    )
+        when (calibrationStep) {
+            1 -> {
+                tempPuzzlesX = x
+                tempPuzzlesY = y
+                calibrationStep = 2
+                stepView.text = "Шаг 2 из 3: Нажмите на вкладку 'Lands' в игре"
+                BotLogs.addLog("📍 Сохранена вкладка Puzzles: (${x.toInt()}, ${y.toInt()})")
+            }
+            2 -> {
+                tempLandsX = x
+                tempLandsY = y
+                calibrationStep = 3
+                stepView.text = "Шаг 3 (опционально): Откройте любой лот и нажмите кнопку 'Buy/Confirm' — либо нажмите 'Автопоиск'"
+                skipBtn.visibility = View.VISIBLE
+                BotLogs.addLog("📍 Сохранена вкладка Lands: (${x.toInt()}, ${y.toInt()})")
+            }
+            else -> {
+                BotLogs.addLog("📍 Сохранена кнопка подтверждения Buy/Confirm: (${x.toInt()}, ${y.toInt()}). Калибровка завершена!")
+                saveCalibrationCoords(confirmX = x, confirmY = y)
+            }
+        }
+    }
+
+    private fun saveCalibrationCoords(confirmX: Float, confirmY: Float) {
+        serviceScope.launch {
+            val db = AppDatabase.getDatabase(applicationContext)
+            val current = db.configurationDao().getConfiguration() ?: AppConfiguration()
+            db.configurationDao().saveConfiguration(
+                current.copy(
+                    isCalibrationEnabled = false,
+                    calibratedPuzzlesX = tempPuzzlesX,
+                    calibratedPuzzlesY = tempPuzzlesY,
+                    calibratedLandsX = tempLandsX,
+                    calibratedLandsY = tempLandsY,
+                    calibratedConfirmX = confirmX,
+                    calibratedConfirmY = confirmY
                 )
-                withContext(Dispatchers.Main) {
-                    stopCalibrationFlow()
-                    Toast.makeText(
-                        applicationContext,
-                        "Координаты Puzzles и Lands сохранены!",
-                        Toast.LENGTH_SHORT
-                    ).show()
+            )
+            withContext(Dispatchers.Main) {
+                stopCalibrationFlow()
+                val msg = if (confirmX != -1f) {
+                    "Координаты Puzzles, Lands и Buy сохранены!"
+                } else {
+                    "Координаты Puzzles и Lands сохранены (кнопка Buy — автопоиск)!"
                 }
+                BotLogs.addLog("✅ $msg")
+                Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
             }
         }
     }

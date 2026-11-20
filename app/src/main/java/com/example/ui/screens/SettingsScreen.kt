@@ -212,6 +212,11 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        Text(
+                            text = formatCoord("Кнопка Buy/Confirm", config.calibratedConfirmX, config.calibratedConfirmY),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
 
                     OutlinedButton(

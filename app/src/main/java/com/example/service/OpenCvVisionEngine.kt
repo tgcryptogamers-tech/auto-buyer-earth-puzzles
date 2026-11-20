@@ -135,10 +135,10 @@ object OpenCvVisionEngine {
         val scaleX = screenWidth / fullBitmap.width.toFloat()
         val scaleY = screenHeight / fullBitmap.height.toFloat()
 
-        val cropTop = (fullBitmap.height * 0.66f).toInt().coerceIn(0, fullBitmap.height - 1)
-        val cropBottom = (fullBitmap.height * 0.83f).toInt().coerceIn(cropTop + 1, fullBitmap.height)
-        val cropLeft = (fullBitmap.width * 0.20f).toInt().coerceIn(0, fullBitmap.width - 1)
-        val cropRight = (fullBitmap.width * 0.80f).toInt().coerceIn(cropLeft + 1, fullBitmap.width)
+        val cropTop = (fullBitmap.height * 0.54f).toInt().coerceIn(0, fullBitmap.height - 1)
+        val cropBottom = (fullBitmap.height * 0.89f).toInt().coerceIn(cropTop + 1, fullBitmap.height)
+        val cropLeft = (fullBitmap.width * 0.16f).toInt().coerceIn(0, fullBitmap.width - 1)
+        val cropRight = (fullBitmap.width * 0.84f).toInt().coerceIn(cropLeft + 1, fullBitmap.width)
         val cropWidth = cropRight - cropLeft
         val cropHeight = cropBottom - cropTop
         if (cropWidth <= 20 || cropHeight <= 20) return null
@@ -153,16 +153,54 @@ object OpenCvVisionEngine {
         val rgbMat = Mat()
         val hsvMat = Mat()
         val yellowMask = Mat()
+        val greenMask = Mat()
 
         try {
             Utils.bitmapToMat(croppedBitmap, rgbaMat)
             Imgproc.cvtColor(rgbaMat, rgbMat, Imgproc.COLOR_RGBA2RGB)
             Imgproc.cvtColor(rgbMat, hsvMat, Imgproc.COLOR_RGB2HSV)
 
-            Core.inRange(hsvMat, Scalar(15.0, 80.0, 100.0), Scalar(36.0, 255.0, 255.0), yellowMask)
-            val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))
-            Imgproc.morphologyEx(yellowMask, yellowMask, Imgproc.MORPH_CLOSE, kernel)
-            kernel.release()
+            // 1. Check for emerald-green MoneyMining action button first (wider, button-shaped rectangle)
+            Core.inRange(hsvMat, Scalar(38.0, 60.0, 55.0), Scalar(92.0, 255.0, 255.0), greenMask)
+            val greenKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(12.0, 6.0))
+            Imgproc.morphologyEx(greenMask, greenMask, Imgproc.MORPH_CLOSE, greenKernel)
+            greenKernel.release()
+
+            val greenContours = mutableListOf<MatOfPoint>()
+            val greenHierarchy = Mat()
+            Imgproc.findContours(greenMask, greenContours, greenHierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+            greenHierarchy.release()
+
+            var bestGreen: org.opencv.core.Rect? = null
+            var maxGreenArea = 0.0
+            for (contour in greenContours) {
+                val rect = Imgproc.boundingRect(contour)
+                val area = Imgproc.contourArea(contour)
+                val centerXPercent = (cropLeft + rect.x + rect.width / 2f) / fullBitmap.width.toFloat()
+                if (centerXPercent in 0.34f..0.66f &&
+                    rect.width >= (cropWidth * 0.20f).toInt() &&
+                    rect.height in 20..(fullBitmap.height * 0.16f).toInt() &&
+                    area >= 450.0
+                ) {
+                    if (area > maxGreenArea) {
+                        maxGreenArea = area
+                        bestGreen = rect
+                    }
+                }
+                contour.release()
+            }
+
+            if (bestGreen != null) {
+                val btnCenterX = (cropLeft + bestGreen.x + bestGreen.width / 2f) * scaleX
+                val btnCenterY = (cropTop + bestGreen.y + bestGreen.height / 2f) * scaleY
+                return Pair(btnCenterX, btnCenterY)
+            }
+
+            // 2. Fallback to golden/yellow button border or merged yellow button text
+            Core.inRange(hsvMat, Scalar(15.0, 75.0, 100.0), Scalar(38.0, 255.0, 255.0), yellowMask)
+            val yellowKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(16.0, 5.0))
+            Imgproc.morphologyEx(yellowMask, yellowMask, Imgproc.MORPH_CLOSE, yellowKernel)
+            yellowKernel.release()
 
             val contours = mutableListOf<MatOfPoint>()
             val hierarchy = Mat()
@@ -170,17 +208,23 @@ object OpenCvVisionEngine {
             hierarchy.release()
 
             var bestCandidate: org.opencv.core.Rect? = null
-            var maxArea = 0.0
+            var maxScore = 0.0
 
             for (contour in contours) {
                 val rect = Imgproc.boundingRect(contour)
                 val area = Imgproc.contourArea(contour)
-                val centerX = rect.x + rect.width / 2f
-                val centerXPercent = (cropLeft + centerX) / fullBitmap.width.toFloat()
+                val centerXPercent = (cropLeft + rect.x + rect.width / 2f) / fullBitmap.width.toFloat()
+                val centerYPercent = (cropTop + rect.y + rect.height / 2f) / fullBitmap.height.toFloat()
 
-                if (centerXPercent in 0.38f..0.62f && (rect.width >= 60 || area >= 150.0)) {
-                    if (area > maxArea) {
-                        maxArea = area
+                // Prefer wide button-like contours in the lower modal area (avoid top coin icons)
+                if (centerXPercent in 0.35f..0.65f &&
+                    centerYPercent >= 0.62f &&
+                    rect.width >= 55 &&
+                    area >= 180.0
+                ) {
+                    val score = area + rect.width * 2.0
+                    if (score > maxScore) {
+                        maxScore = score
                         bestCandidate = rect
                     }
                 }
@@ -198,6 +242,7 @@ object OpenCvVisionEngine {
             rgbMat.release()
             hsvMat.release()
             yellowMask.release()
+            greenMask.release()
             croppedBitmap.recycle()
         }
         return null

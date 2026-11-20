@@ -31,4 +31,7 @@ interface PurchaseDao {
 
     @Query("DELETE FROM purchase_history WHERE id = :id")
     suspend fun deletePurchaseById(id: Long)
+
+    @Query("DELETE FROM purchase_history WHERE id = (SELECT MAX(id) FROM purchase_history)")
+    suspend fun deleteLatestPurchase()
 }
