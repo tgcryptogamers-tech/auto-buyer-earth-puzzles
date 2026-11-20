@@ -63,6 +63,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val cooldownRemainingSec: StateFlow<Long> = _cooldownRemainingSec.asStateFlow()
 
     init {
+        BotLogs.init(application)
         viewModelScope.launch {
             if (configDao.getConfiguration() == null) {
                 configDao.saveConfiguration(AppConfiguration())

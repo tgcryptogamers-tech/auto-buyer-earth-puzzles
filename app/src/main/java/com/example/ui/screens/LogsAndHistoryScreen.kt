@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -33,8 +34,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.PurchaseRecord
@@ -55,6 +58,8 @@ fun LogsAndHistoryScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    @Suppress("DEPRECATION")
+    val composeClipboard = LocalClipboardManager.current
     val dateFormatter = SimpleDateFormat("dd.MM HH:mm:ss", Locale.getDefault())
 
     Box(
@@ -100,12 +105,21 @@ fun LogsAndHistoryScreen(
                         Row {
                             IconButton(
                                 onClick = {
-                                    val copied = BotLogs.copyToClipboard(context)
-                                    Toast.makeText(
-                                        context,
-                                        if (copied) "Логи скопированы" else "Не удалось скопировать",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    val text = BotLogs.getAllLogsText()
+                                    if (text.isBlank()) {
+                                        Toast.makeText(context, "Лог пока пуст", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        val copied = BotLogs.copyToClipboard(context)
+                                        try {
+                                            composeClipboard.setText(AnnotatedString(text))
+                                        } catch (_: Throwable) {
+                                        }
+                                        Toast.makeText(
+                                            context,
+                                            if (copied) "Скопировано строк: ${logs.size}" else "Не удалось скопировать",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
                                 },
                                 modifier = Modifier.testTag("copy_logs_button")
                             ) {
@@ -129,24 +143,24 @@ fun LogsAndHistoryScreen(
                         }
                     }
 
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(MaterialTheme.shapes.small)
-                            .background(MaterialTheme.colorScheme.background)
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (logs.isEmpty()) {
-                            Text(
-                                text = "Логи пока пусты. Запустите мониторинг или выберите скриншот на панели.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            logs.takeLast(30).reversed().forEach { line ->
+                    SelectionContainer {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(MaterialTheme.shapes.small)
+                                .background(MaterialTheme.colorScheme.background)
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (logs.isEmpty()) {
                                 Text(
-                                    text = line,
+                                    text = "Логи пока пусты. Запустите мониторинг или выберите скриншот на панели.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Text(
+                                    text = logs.takeLast(60).reversed().joinToString("\n"),
                                     fontFamily = JetBrainsMonoFontFamily,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary

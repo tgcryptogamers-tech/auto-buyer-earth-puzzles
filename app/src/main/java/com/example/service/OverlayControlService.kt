@@ -81,6 +81,7 @@ class OverlayControlService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        BotLogs.init(this)
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         createNotificationChannel()
@@ -433,26 +434,41 @@ class OverlayControlService : Service() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
         )
-        logHeaderRow.addView(
-            Button(this).apply {
-                text = "КОПИЯ"
-                textSize = 10f
-                setBackgroundColor(Color.parseColor("#144D31"))
-                setTextColor(Color.WHITE)
-                setOnClickListener {
-                    val ok = BotLogs.copyToClipboard(this@OverlayControlService)
-                    Toast.makeText(
-                        this@OverlayControlService,
-                        if (ok) "Логи скопированы" else "Ошибка копирования",
-                        Toast.LENGTH_SHORT
-                    ).show()
+        val copyBtn = Button(this).apply {
+            text = "КОПИЯ"
+            textSize = 10f
+            minWidth = 0
+            minimumWidth = 0
+            minHeight = 0
+            minimumHeight = 0
+            setPadding(18, 10, 18, 10)
+            setBackgroundColor(Color.parseColor("#144D31"))
+            setTextColor(Color.WHITE)
+            setOnClickListener { btn ->
+                val ok = BotLogs.copyToClipboard(applicationContext)
+                if (ok) {
+                    (btn as? Button)?.text = "✓ СКОП."
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        (btn as? Button)?.text = "КОПИЯ"
+                    }, 1800L)
                 }
+                Toast.makeText(
+                    applicationContext,
+                    if (ok) "Логи скопированы в буфер" else "Логи пока пусты",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
-        )
+        }
+        logHeaderRow.addView(copyBtn)
         logHeaderRow.addView(
             Button(this).apply {
                 text = "ЭКСПОРТ"
                 textSize = 10f
+                minWidth = 0
+                minimumWidth = 0
+                minHeight = 0
+                minimumHeight = 0
+                setPadding(18, 10, 18, 10)
                 setBackgroundColor(Color.parseColor("#21332B"))
                 setTextColor(Color.WHITE)
                 layoutParams = LinearLayout.LayoutParams(
@@ -472,8 +488,13 @@ class OverlayControlService : Service() {
             setBackgroundColor(Color.parseColor("#0A110E"))
             setPadding(10, 10, 10, 10)
         }
-        val logContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        logScroll.addView(logContainer)
+        val logTextView = TextView(this).apply {
+            setTextColor(Color.parseColor("#28C76F"))
+            textSize = 10f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextIsSelectable(true)
+        }
+        logScroll.addView(logTextView)
         rootLayout.addView(logScroll)
 
         panel.addView(rootLayout)
@@ -482,18 +503,11 @@ class OverlayControlService : Service() {
 
         logsJob = serviceScope.launch {
             BotLogs.logs.collect { list ->
-                logContainer.removeAllViews()
-                list.takeLast(40).forEach { line ->
-                    logContainer.addView(
-                        TextView(this@OverlayControlService).apply {
-                            text = line
-                            setTextColor(Color.parseColor("#28C76F"))
-                            textSize = 10f
-                            typeface = android.graphics.Typeface.MONOSPACE
-                        }
-                    )
+                val nextText = list.takeLast(50).joinToString("\n")
+                if (logTextView.text?.toString() != nextText) {
+                    logTextView.text = nextText
+                    logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
                 }
-                logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
             }
         }
 

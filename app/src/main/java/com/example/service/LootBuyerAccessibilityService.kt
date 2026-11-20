@@ -7,6 +7,8 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
@@ -91,6 +93,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        BotLogs.init(this)
         OpenCvVisionEngine.init()
         BotLogs.addLog("✅ Accessibility Service подключен и готов к работе с игрой.")
     }
@@ -575,9 +578,10 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             )
         }
 
-        // Poll fresh screenshots until the confirmation modal finishes rendering (up to ~1.2s)
+        // Poll fresh screenshots until the confirmation modal finishes rendering (up to ~1.4s)
         var detectedButton: Pair<Pair<Float, Float>, String>? = null
         var modalSeenOnScreen = false
+        var lastModalDebugText = ""
 
         for (attempt in 1..6) {
             val minTs = if (attempt == 1) tapLotTime + 50L else System.currentTimeMillis() - 30L
@@ -594,6 +598,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                         !isInsideOverlay(line.boundingBox, screenWidth, screenHeight, density, scaleX, scaleY) &&
                             !isLogOrOverlayText(line.text)
                     }
+                    lastModalDebugText = lines.joinToString(" | ") { it.text }.take(140)
 
                     if (handleTryThroughDialogIfNeeded(lines, scaleX, scaleY, screenWidth, screenHeight, config)) {
                         return false
@@ -603,17 +608,17 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     }
 
                     val modalOpen = isConfirmationDialogShowing(lines, scaleX, scaleY, screenWidth, screenHeight)
+                    val marketCovered = attempt >= 2 && !isMarketListShowing(lines, scaleY, screenHeight)
                     val buttonMatch = findBuyButtonCoordinates(
                         dialogBitmap, lines, scaleX, scaleY, screenWidth, screenHeight, config, allowCache = false
                     )
 
-                    if (buttonMatch != null && (modalOpen || buttonMatch.second.startsWith("OCR"))) {
+                    if (buttonMatch != null && (modalOpen || marketCovered || buttonMatch.second.startsWith("OCR") || attempt >= 2)) {
                         detectedButton = buttonMatch
                         modalSeenOnScreen = true
                         break
-                    } else if (modalOpen) {
+                    } else if (modalOpen || marketCovered) {
                         modalSeenOnScreen = true
-                        // Wait one extra short beat if button wasn't found yet, unless this is the final poll
                         if (attempt >= 3) {
                             detectedButton = buttonMatch
                             break
@@ -629,14 +634,16 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         }
 
         if (!modalSeenOnScreen && detectedButton == null) {
-            // Check cached coordinates ONLY if modal might have rendered without recognizable text
-            BotLogs.addLog("⚠️ [ПОДТВЕРЖДЕНИЕ] Окно покупки не появилось после клика по лоту (возможно, лот уже снят или WebView не успел открыться).")
+            BotLogs.addLog("⚠️ [ПОДТВЕРЖДЕНИЕ] Окно покупки не появилось (OCR: $lastModalDebugText)")
             return false
         }
 
+        // Brief settle delay so WebView CSS transition finishes before clicking Buy
+        delay(140L)
+
         val (coords, source) = detectedButton ?: run {
-            val fallback = (cachedBuyX ?: (screenWidth * 0.50f)) to (cachedBuyY ?: (screenHeight * 0.746f))
-            val label = if (cachedBuyX != null && cachedBuyY != null) "Кэш" else "Резервная геометрия"
+            val fallback = (cachedBuyX ?: (screenWidth * 0.50f)) to (cachedBuyY ?: (screenHeight * 0.748f))
+            val label = if (cachedBuyX != null && cachedBuyY != null) "Кэш" else "Центр Buy (геометрия)"
             fallback to label
         }
 
@@ -647,9 +654,12 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             cachedBuyY = buyClickY
         }
 
-        BotLogs.addLog("⚡ [ПОДТВЕРЖДЕНИЕ] Нажимаем кнопку [$source] в (${buyClickX.toInt()}, ${buyClickY.toInt()})")
+        BotLogs.addLog("⚡ [ПОДТВЕРЖДЕНИЕ] Кликаем [$source] в (${buyClickX.toInt()}, ${buyClickY.toInt()})")
         val confirmTapTime = System.currentTimeMillis()
-        dispatchClickSuspend(buyClickX, buyClickY)
+        val tapOk = dispatchClickSuspend(buyClickX, buyClickY, durationMs = 70L)
+        if (!tapOk) {
+            BotLogs.addLog("⚠️ Жест подтверждения не подтверждён системой — проверяем экран и пробуем повторно...")
+        }
 
         return verifyPurchaseResultAndHandleFailure(
             targetTab, price, qty, config, screenWidth, screenHeight, density, db, recognizer,
@@ -673,16 +683,16 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         val found = findBuyButtonCoordinates(
             bitmap, lines, scaleX, scaleY, screenWidth, screenHeight, config, allowCache = true
         )
-        val (coords, source) = found ?: ((screenWidth * 0.50f to screenHeight * 0.746f) to "Резервная геометрия")
+        val (coords, source) = found ?: ((screenWidth * 0.50f to screenHeight * 0.748f) to "Центр Buy (геометрия)")
 
         if (source.startsWith("OCR") || source == "OpenCV") {
             cachedBuyX = coords.first
             cachedBuyY = coords.second
         }
 
-        BotLogs.addLog("🎯 [ОТКРЫТОЕ ОКНО ПОКУПКИ] Нажимаем кнопку [$source] в (${coords.first.toInt()}, ${coords.second.toInt()})")
+        BotLogs.addLog("🎯 [ОТКРЫТОЕ ОКНО ПОКУПКИ] Кликаем [$source] в (${coords.first.toInt()}, ${coords.second.toInt()})")
         val confirmTapTime = System.currentTimeMillis()
-        dispatchClickSuspend(coords.first, coords.second)
+        dispatchClickSuspend(coords.first, coords.second, durationMs = 70L)
 
         return verifyPurchaseResultAndHandleFailure(
             targetTab, detectedPrice, 1.0, config, screenWidth, screenHeight,
@@ -708,8 +718,9 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         var prevX = lastClickX
         var prevY = lastClickY
         var tapTimestamp = confirmTapTime
+        var absentModalCount = 0
 
-        for (attempt in 1..4) {
+        for (attempt in 1..5) {
             delay(360L)
             val verifyBitmap = MediaProjectionHelper.captureFreshScreenshot(
                 minTimestampMs = tapTimestamp + 60L,
@@ -745,43 +756,55 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     dismissSystemDialogIfNeeded(lines, scaleX, scaleY, screenWidth, screenHeight, config)
                     recordConfirmedPurchase(targetTab, price, qty, db)
                     shouldReturnTrue = true
-                } else if (isConfirmationDialogShowing(lines, scaleX, scaleY, screenWidth, screenHeight)) {
-                    // 4. Confirmation modal is STILL open! Previous tap missed — invalidate cache & retry!
-                    cachedBuyX = null
-                    cachedBuyY = null
-
-                    val found = findBuyButtonCoordinates(
-                        verifyBitmap, lines, scaleX, scaleY, screenWidth, screenHeight,
-                        config.copy(calibratedConfirmX = -1f, calibratedConfirmY = -1f),
-                        allowCache = false
-                    )
-                    if (found != null) {
-                        var candidateX = found.first.first
-                        var candidateY = found.first.second
-                        // If same point failed twice in a row and wasn't an exact OCR text hit, try nudging Y
-                        if (!found.second.startsWith("OCR") &&
-                            abs(candidateX - prevX) < 12f && abs(candidateY - prevY) < 12f
-                        ) {
-                            val nudge = when (attempt) {
-                                1 -> -screenHeight * 0.035f
-                                2 -> screenHeight * 0.035f
-                                else -> -screenHeight * 0.07f
-                            }
-                            candidateY = (candidateY + nudge).coerceIn(screenHeight * 0.52f, screenHeight * 0.90f)
-                        }
-                        retryCoords = candidateX to candidateY
-                        retrySource = found.second
+                } else if (isConfirmationDialogShowing(lines, scaleX, scaleY, screenWidth, screenHeight) ||
+                    !isMarketListShowing(lines, scaleY, screenHeight)
+                ) {
+                    // 4. Confirmation modal is STILL open (or market list is still covered by modal)!
+                    val stillConfirm = isConfirmationDialogShowing(lines, scaleX, scaleY, screenWidth, screenHeight)
+                    if (!stillConfirm) {
+                        absentModalCount++
                     } else {
-                        val nudge = when (attempt) {
-                            1 -> -screenHeight * 0.045f
-                            2 -> screenHeight * 0.045f
-                            else -> -screenHeight * 0.09f
+                        absentModalCount = 0
+                    }
+
+                    if (stillConfirm || absentModalCount < 2) {
+                        cachedBuyX = null
+                        cachedBuyY = null
+
+                        val found = findBuyButtonCoordinates(
+                            verifyBitmap, lines, scaleX, scaleY, screenWidth, screenHeight,
+                            config.copy(calibratedConfirmX = -1f, calibratedConfirmY = -1f),
+                            allowCache = false
+                        )
+                        if (found != null) {
+                            var candidateX = found.first.first
+                            var candidateY = found.first.second
+                            if (!found.second.startsWith("OCR") &&
+                                abs(candidateX - prevX) < 12f && abs(candidateY - prevY) < 12f
+                            ) {
+                                val nudge = when (attempt) {
+                                    1 -> -screenHeight * 0.03f
+                                    2 -> screenHeight * 0.03f
+                                    else -> -screenHeight * 0.06f
+                                }
+                                candidateY = (candidateY + nudge).coerceIn(screenHeight * 0.55f, screenHeight * 0.88f)
+                            }
+                            retryCoords = candidateX to candidateY
+                            retrySource = found.second
+                        } else {
+                            val targetY = if (attempt == 1) screenHeight * 0.748f else {
+                                val nudge = if (attempt % 2 == 0) -screenHeight * 0.035f else screenHeight * 0.035f
+                                (prevY + nudge).coerceIn(screenHeight * 0.58f, screenHeight * 0.86f)
+                            }
+                            retryCoords = (screenWidth * 0.50f) to targetY
+                            retrySource = "Центр Buy"
                         }
-                        retryCoords = (screenWidth * 0.50f) to (prevY + nudge).coerceIn(screenHeight * 0.55f, screenHeight * 0.88f)
-                        retrySource = "Смещение Y"
+                    } else {
+                        recordConfirmedPurchase(targetTab, price, qty, db)
+                        shouldReturnTrue = true
                     }
                 } else {
-                    // 5. Confirmation modal is GONE and no failure popup appeared -> purchase succeeded!
+                    // 5. Market list (Puzzles/Lands/Showed) is clearly visible again -> modal closed, purchase succeeded!
                     recordConfirmedPurchase(targetTab, price, qty, db)
                     shouldReturnTrue = true
                 }
@@ -801,15 +824,15 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     cachedBuyX = prevX
                     cachedBuyY = prevY
                 }
-                BotLogs.addLog("🔄 [ПОВТОР $attempt/4] Окно подтверждения ещё открыто — кликаем [$retrySource] в (${prevX.toInt()}, ${prevY.toInt()})")
+                BotLogs.addLog("🔄 [ПОВТОР $attempt/5] Окно подтверждения ещё открыто — кликаем [$retrySource] в (${prevX.toInt()}, ${prevY.toInt()})")
                 tapTimestamp = System.currentTimeMillis()
-                dispatchClickSuspend(prevX, prevY)
+                dispatchClickSuspend(prevX, prevY, durationMs = 70L)
             }
         }
 
         cachedBuyX = null
         cachedBuyY = null
-        BotLogs.addLog("❌ [ПОДТВЕРЖДЕНИЕ] Окно подтверждения не закрылось после 4 попыток. Кулдаун НЕ ставим.")
+        BotLogs.addLog("❌ [ПОДТВЕРЖДЕНИЕ] Окно подтверждения не закрылось. Кулдаун НЕ ставим.")
         return false
     }
 
@@ -922,9 +945,12 @@ class LootBuyerAccessibilityService : AccessibilityService() {
     private fun isBuyConfirmationText(text: String): Boolean {
         val t = text.lowercase().trim()
         return t == "buy" || t.contains("buy") ||
-            t.contains("3uy") || t.contains("13uy") ||
-            t.contains("buv") || t.contains("bvy") ||
+            t.contains("3uy") || t.contains("13uy") || t.contains("8uy") ||
+            t.contains("buv") || t.contains("bvy") || t.contains("buj") ||
             t.contains("boy") || t.contains("bov") || t.contains("bup") ||
+            t.contains("ruy") || t.contains("ruv") || t.contains("bay") ||
+            t.contains("duy") || t.contains("guy") || t.contains("suy") ||
+            t.contains("roy") ||
             t.contains("купить") || t.contains("выкупить") ||
             t.contains("kynut") || t.contains("kupit") || t.contains("kup") ||
             t.contains("confirm") || t.contains("conflrm") ||
@@ -964,6 +990,23 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             fullText.contains("рыночное предложение")
     }
 
+    private fun isMarketListShowing(
+        lines: List<Text.Line>,
+        scaleY: Float,
+        screenHeight: Float
+    ): Boolean {
+        if (screenHeight <= 0f) return false
+        return lines.any { line ->
+            val b = line.boundingBox ?: return@any false
+            val cY = (b.centerY() * scaleY) / screenHeight
+            val t = line.text.lowercase()
+            cY in 0.28f..0.54f && (
+                t.contains("puzzles") || t.contains("lands") ||
+                    t.contains("bricks") || t.contains("showed") || t.contains("kingdom")
+                )
+        }
+    }
+
     private fun isConfirmationDialogShowing(
         lines: List<Text.Line>,
         scaleX: Float,
@@ -985,14 +1028,23 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             return false
         }
 
-        val hasModalPhrase = fullText.contains("you will pay") ||
+        val hasModalPhrase = fullText.contains("purchase") ||
+            fullText.contains("purohase") ||
+            fullText.contains("purcnase") ||
+            fullText.contains("purchas") ||
+            fullText.contains("you will pay") ||
             fullText.contains("vou will pay") ||
+            fullText.contains("qou will pay") ||
+            fullText.contains("lou will pay") ||
             fullText.contains("you wil pay") ||
+            fullText.contains("will pay") ||
+            fullText.contains("will poy") ||
+            fullText.contains("wil pay") ||
+            fullText.contains("you will") ||
             fullText.contains("вы заплатите") ||
             fullText.contains("bы заплатите") ||
             fullText.contains("вы заплатит") ||
             fullText.contains("покупка") ||
-            fullText.contains("confirm purchase") ||
             fullText.contains("are you sure") ||
             fullText.contains("вы уверены") ||
             fullText.contains("подтверждение") ||
@@ -1106,12 +1158,13 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         dispatchGesture(gesture, null, null)
     }
 
-    private suspend fun dispatchClickSuspend(x: Float, y: Float, durationMs: Long = 50L): Boolean {
+    private suspend fun dispatchClickSuspend(x: Float, y: Float, durationMs: Long = 55L): Boolean {
         val path = Path().apply { moveTo(x.coerceAtLeast(1f), y.coerceAtLeast(1f)) }
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0L, durationMs))
             .build()
-        return withTimeoutOrNull(350L) {
+        val mainHandler = Handler(Looper.getMainLooper())
+        return withTimeoutOrNull(450L) {
             suspendCancellableCoroutine { cont ->
                 val dispatched = dispatchGesture(
                     gesture,
@@ -1124,7 +1177,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                             if (cont.isActive) cont.resume(false)
                         }
                     },
-                    null
+                    mainHandler
                 )
                 if (!dispatched && cont.isActive) {
                     cont.resume(false)

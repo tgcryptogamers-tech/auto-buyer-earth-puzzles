@@ -218,11 +218,12 @@ object OpenCvVisionEngine {
 
                 // Prefer wide button-like contours in the lower modal area (avoid top coin icons)
                 if (centerXPercent in 0.35f..0.65f &&
-                    centerYPercent >= 0.62f &&
-                    rect.width >= 55 &&
-                    area >= 180.0
+                    centerYPercent in 0.66f..0.86f &&
+                    rect.width >= 40 &&
+                    area >= 100.0
                 ) {
-                    val score = area + rect.width * 2.0
+                    val centerBias = 1.0 - kotlin.math.abs(centerXPercent - 0.50f)
+                    val score = (area + rect.width * 3.0) * centerBias
                     if (score > maxScore) {
                         maxScore = score
                         bestCandidate = rect
