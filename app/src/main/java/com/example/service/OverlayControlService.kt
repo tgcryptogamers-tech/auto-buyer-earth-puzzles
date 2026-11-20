@@ -444,19 +444,19 @@ class OverlayControlService : Service() {
             setPadding(18, 10, 18, 10)
             setBackgroundColor(Color.parseColor("#144D31"))
             setTextColor(Color.WHITE)
-            setOnClickListener { btn ->
-                val ok = BotLogs.copyToClipboard(applicationContext)
-                if (ok) {
-                    (btn as? Button)?.text = "✓ СКОП."
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        (btn as? Button)?.text = "КОПИЯ"
-                    }, 1800L)
+            setOnClickListener {
+                if (BotLogs.getAllLogsText().isBlank()) {
+                    Toast.makeText(applicationContext, "Логи пока пусты", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
                 }
-                Toast.makeText(
-                    applicationContext,
-                    if (ok) "Логи скопированы в буфер" else "Логи пока пусты",
-                    Toast.LENGTH_SHORT
-                ).show()
+                // Collapse panel before launching ClipboardCopyActivity so the non-FLAG_NOT_FOCUSABLE
+                // overlay window doesn't intercept foreground focus required by Android 10+ clipboard API.
+                removeControlPanel()
+                createFloatingBubble()
+                val launched = BotLogs.copyToClipboard(applicationContext)
+                if (!launched) {
+                    Toast.makeText(applicationContext, "Не удалось открыть копирование — используйте ЭКСПОРТ", Toast.LENGTH_SHORT).show()
+                }
             }
         }
         logHeaderRow.addView(copyBtn)

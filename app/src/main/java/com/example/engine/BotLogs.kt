@@ -80,34 +80,32 @@ object BotLogs {
 
     fun getAllLogsText(): String = _logs.value.joinToString("\n")
 
+    private tailrec fun Context.findActivity(): android.app.Activity? = when (this) {
+        is android.app.Activity -> this
+        is android.content.ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
+
     fun copyToClipboard(context: Context, header: String = ""): Boolean {
         init(context)
         val body = getAllLogsText()
         if (body.isBlank() && header.isBlank()) return false
         val payload = if (header.isNotBlank()) "$header\n$body" else body
-        val safe = payload.takeLast(250_000)
+        val safe = payload.takeLast(120_000)
 
-        fun writeClip(): Boolean {
-            return try {
-                val appCtx = context.applicationContext
-                val cm = (context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
-                    ?: (appCtx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
-                if (cm != null) {
-                    cm.setPrimaryClip(ClipData.newPlainText("Earth Puzzles Bot Logs", safe))
-                    true
-                } else {
-                    false
-                }
-            } catch (_: Throwable) {
-                false
-            }
+        // When invoked from an Activity (in-app), write directly and verify.
+        val activity = context.findActivity()
+        if (activity != null) {
+            return com.example.ClipboardCopyActivity.writeClipboardDirect(activity, safe)
         }
 
-        return if (Looper.myLooper() == Looper.getMainLooper()) {
-            writeClip()
-        } else {
-            Handler(Looper.getMainLooper()).post { writeClip() }
+        // When invoked from a background Service (Overlay), Android 10+ blocks Service
+        // clipboard writes unless a focused foreground Activity performs the write.
+        return try {
+            com.example.ClipboardCopyActivity.launch(context, safe)
             true
+        } catch (_: Throwable) {
+            false
         }
     }
 

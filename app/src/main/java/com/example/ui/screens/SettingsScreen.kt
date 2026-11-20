@@ -64,11 +64,48 @@ fun SettingsScreen(
     onResetCoordinates: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var tabSwitchSlider by remember(config.tabSwitchIntervalMs) {
-        mutableFloatStateOf(config.tabSwitchIntervalMs.toFloat().coerceIn(20f, 1500f))
+    var tabSwitchSlider by remember {
+        mutableFloatStateOf(config.tabSwitchIntervalMs.toFloat().coerceIn(40f, 1500f))
     }
-    var scanIntervalSlider by remember(config.scanIntervalMs) {
+    var isDraggingTabSlider by remember { mutableStateOf(false) }
+
+    var scanIntervalSlider by remember {
         mutableFloatStateOf(config.scanIntervalMs.toFloat().coerceIn(0f, 1500f))
+    }
+    var isDraggingScanSlider by remember { mutableStateOf(false) }
+
+    LaunchedEffect(config.tabSwitchIntervalMs) {
+        if (!isDraggingTabSlider) {
+            val target = config.tabSwitchIntervalMs.toFloat().coerceIn(40f, 1500f)
+            if (abs(tabSwitchSlider - target) >= 1f) {
+                tabSwitchSlider = target
+            }
+        }
+    }
+
+    LaunchedEffect(tabSwitchSlider) {
+        val desired = tabSwitchSlider.toLong().coerceIn(40L, 1500L)
+        if (desired != config.tabSwitchIntervalMs) {
+            kotlinx.coroutines.delay(90L)
+            onUpdateConfig { it.copy(tabSwitchIntervalMs = desired) }
+        }
+    }
+
+    LaunchedEffect(config.scanIntervalMs) {
+        if (!isDraggingScanSlider) {
+            val target = config.scanIntervalMs.toFloat().coerceIn(0f, 1500f)
+            if (abs(scanIntervalSlider - target) >= 1f) {
+                scanIntervalSlider = target
+            }
+        }
+    }
+
+    LaunchedEffect(scanIntervalSlider) {
+        val desired = scanIntervalSlider.toLong().coerceIn(0L, 1500L)
+        if (desired != config.scanIntervalMs) {
+            kotlinx.coroutines.delay(90L)
+            onUpdateConfig { it.copy(scanIntervalMs = desired) }
+        }
     }
 
     var thresholdInput by remember(config.priceThreshold) {
@@ -350,40 +387,141 @@ fun SettingsScreen(
                         )
                     }
 
-                    Column {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "Задержка после переключения вкладки: ${tabSwitchSlider.toLong()} мс",
                             style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Как в рабочем боте: оптимально ~400–450 мс (слишком низкие значения < 150 мс не дают игре прогрузить лоты)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Slider(
                             value = tabSwitchSlider,
-                            onValueChange = { v -> tabSwitchSlider = v },
+                            onValueChange = { v ->
+                                isDraggingTabSlider = true
+                                tabSwitchSlider = v
+                            },
                             onValueChangeFinished = {
-                                val ms = tabSwitchSlider.toLong().coerceIn(20L, 1500L)
+                                isDraggingTabSlider = false
+                                val ms = tabSwitchSlider.toLong().coerceIn(40L, 1500L)
                                 onUpdateConfig { it.copy(tabSwitchIntervalMs = ms) }
                             },
-                            valueRange = 20f..1500f,
+                            valueRange = 40f..1500f,
                             modifier = Modifier.testTag("settings_tab_switch_slider")
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    val ms = (tabSwitchSlider.toLong() - 50L).coerceIn(40L, 1500L)
+                                    tabSwitchSlider = ms.toFloat()
+                                    onUpdateConfig { it.copy(tabSwitchIntervalMs = ms) }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("tab_switch_minus_50")
+                            ) {
+                                Text("−50 мс")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    tabSwitchSlider = 430f
+                                    onUpdateConfig { it.copy(tabSwitchIntervalMs = 430L) }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("tab_switch_preset_430")
+                            ) {
+                                Text("430 мс")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val ms = (tabSwitchSlider.toLong() + 50L).coerceIn(40L, 1500L)
+                                    tabSwitchSlider = ms.toFloat()
+                                    onUpdateConfig { it.copy(tabSwitchIntervalMs = ms) }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("tab_switch_plus_50")
+                            ) {
+                                Text("+50 мс")
+                            }
+                        }
                     }
 
-                    Column {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "Доп. пауза между циклами: ${scanIntervalSlider.toLong()} мс",
                             style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Slider(
                             value = scanIntervalSlider,
-                            onValueChange = { v -> scanIntervalSlider = v },
+                            onValueChange = { v ->
+                                isDraggingScanSlider = true
+                                scanIntervalSlider = v
+                            },
                             onValueChangeFinished = {
+                                isDraggingScanSlider = false
                                 val ms = scanIntervalSlider.toLong().coerceIn(0L, 1500L)
                                 onUpdateConfig { it.copy(scanIntervalMs = ms) }
                             },
                             valueRange = 0f..1500f,
                             modifier = Modifier.testTag("settings_scan_interval_slider")
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    val ms = (scanIntervalSlider.toLong() - 50L).coerceIn(0L, 1500L)
+                                    scanIntervalSlider = ms.toFloat()
+                                    onUpdateConfig { it.copy(scanIntervalMs = ms) }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("scan_interval_minus_50")
+                            ) {
+                                Text("−50 мс")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    scanIntervalSlider = 0f
+                                    onUpdateConfig { it.copy(scanIntervalMs = 0L) }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("scan_interval_preset_0")
+                            ) {
+                                Text("0 мс")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val ms = (scanIntervalSlider.toLong() + 50L).coerceIn(0L, 1500L)
+                                    scanIntervalSlider = ms.toFloat()
+                                    onUpdateConfig { it.copy(scanIntervalMs = ms) }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("scan_interval_plus_50")
+                            ) {
+                                Text("+50 мс")
+                            }
+                        }
                     }
 
                     Row(

@@ -67,6 +67,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
     @Volatile private var lastHeartbeatLogTime = 0L
     @Volatile private var nextMultiTabIndex = 0
     @Volatile private var checkModalBeforeSwitch = true
+    @Volatile private var lastLoggedTabIntervalMs: Long = -1L
     private val sharedRecognizer: TextRecognizer by lazy {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
@@ -138,6 +139,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         purchasesThisCycleRun = 0
         nextMultiTabIndex = 0
         checkModalBeforeSwitch = true
+        lastLoggedTabIntervalMs = -1L
 
         BotLogs.addLog("🚀 Запуск цикла бота для вкладок Puzzles и Lands...")
 
@@ -162,6 +164,11 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     if (config == null || !config.autoBuyEnabled) {
                         delay(800)
                         continue
+                    }
+
+                    if (config.tabSwitchIntervalMs != lastLoggedTabIntervalMs) {
+                        lastLoggedTabIntervalMs = config.tabSwitchIntervalMs
+                        BotLogs.addLog("⏱ Задержка вкладок: ${config.tabSwitchIntervalMs} мс | Пауза цикла: ${config.scanIntervalMs} мс")
                     }
 
                     if (config.useSearchCycles) {
@@ -240,8 +247,11 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         textBlocks: List<Text.TextBlock>,
         scaleX: Float,
         scaleY: Float,
+        screenWidth: Float,
         screenHeight: Float
     ) {
+        var detectedRowY: Float? = null
+
         fun checkAndAssign(rawText: String, bounds: Rect?) {
             if (bounds == null) return
             val text = rawText.lowercase().trim()
@@ -250,12 +260,23 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             val tYPercent = tY / screenHeight
             if (tYPercent !in 0.28f..0.56f) return
 
-            if (text.contains("puzzle") || text.contains("пазл")) {
+            if (text.contains("puzzle") || text.contains("puzz") || text.contains("puzl") || text.contains("пазл")) {
                 cachedTabPuzzlesX = tX
                 cachedTabPuzzlesY = tY
-            } else if (text.contains("land") || text.contains("земл")) {
+                detectedRowY = tY
+            } else if (
+                text.contains("land") || text.contains("lard") ||
+                text.contains("iand") || text.contains("laud") ||
+                text.contains("1and") || text.contains("земл")
+            ) {
                 cachedTabLandsX = tX
                 cachedTabLandsY = tY
+                detectedRowY = tY
+            } else if (
+                text.contains("brick") || text.contains("br1ck") ||
+                text.contains("brik") || text.contains("кирпич")
+            ) {
+                detectedRowY = tY
             }
         }
 
@@ -265,6 +286,20 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                 for (element in line.elements) {
                     checkAndAssign(element.text, element.boundingBox)
                 }
+            }
+        }
+
+        // Geometric sibling tab derivation: Puzzles (~17%), Lands (~50%), Bricks (~83%) share the same Y row.
+        // Ensures both tabs resolve on Frame #1 even when medieval font misreads "Lands".
+        val rowY = detectedRowY ?: cachedTabPuzzlesY ?: cachedTabLandsY
+        if (rowY != null && screenWidth > 0f) {
+            if (cachedTabPuzzlesX == null || cachedTabPuzzlesY == null) {
+                cachedTabPuzzlesX = screenWidth * 0.17f
+                cachedTabPuzzlesY = rowY
+            }
+            if (cachedTabLandsX == null || cachedTabLandsY == null) {
+                cachedTabLandsX = screenWidth * 0.50f
+                cachedTabLandsY = rowY
             }
         }
     }
@@ -309,7 +344,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                 val preScaleX = screenWidth / preBitmap.width
                 val preScaleY = screenHeight / preBitmap.height
                 val preResult = Tasks.await(recognizer.process(InputImage.fromBitmap(preBitmap, 0)))
-                scanTabsFromOcrResults(preResult.textBlocks, preScaleX, preScaleY, screenHeight)
+                scanTabsFromOcrResults(preResult.textBlocks, preScaleX, preScaleY, screenWidth, screenHeight)
 
                 val preLines = preResult.textBlocks.flatMap { it.lines }.filter { line ->
                     !isInsideOverlay(line.boundingBox, screenWidth, screenHeight, density, preScaleX, preScaleY) &&
@@ -363,7 +398,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             clickAtWithRandomization(targetCoords.first, targetCoords.second, config)
             delay(settleDelay)
         } else if (config.switchBetweenTabs && altCoords != null) {
-            val bounceDelay = minOf(45L, maxOf(24L, config.tabSwitchIntervalMs / 4))
+            val bounceDelay = minOf(60L, maxOf(42L, config.tabSwitchIntervalMs / 4))
             if (config.verboseOcrLogging) {
                 BotLogs.addLog("🔀 Переключаемся в игре: ${alternateTab.tabLabel} (${bounceDelay} мс) -> ${targetTab.tabLabel} (${settleDelay} мс)")
             }
@@ -1176,7 +1211,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
     fun clickAt(x: Float, y: Float) {
         val path = Path().apply { moveTo(x, y) }
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0L, 16L))
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 35L))
             .build()
         dispatchGesture(gesture, null, null)
     }
