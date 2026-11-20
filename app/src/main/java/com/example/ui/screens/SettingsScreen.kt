@@ -201,7 +201,10 @@ fun SettingsScreen(
                     MarketTabsStripPreview(
                         buyPuzzles = config.buyPuzzles,
                         buyLands = config.buyLands,
-                        switchBetweenTabs = config.switchBetweenTabs
+                        switchBetweenTabs = config.switchBetweenTabs,
+                        onToggleTabSwitching = { checked ->
+                            onUpdateConfig { it.copy(switchBetweenTabs = checked) }
+                        }
                     )
                 }
             }

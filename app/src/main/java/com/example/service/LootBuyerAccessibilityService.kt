@@ -224,13 +224,19 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun getTabCoordinates(tab: MarketTab, config: AppConfiguration): Pair<Float, Float>? {
+    private fun getTabCoordinates(
+        tab: MarketTab,
+        config: AppConfiguration,
+        screenWidth: Float
+    ): Pair<Float, Float>? {
         return when (tab) {
             MarketTab.PUZZLES -> when {
                 config.calibratedPuzzlesX != -1f && config.calibratedPuzzlesY != -1f ->
                     config.calibratedPuzzlesX to config.calibratedPuzzlesY
                 cachedTabPuzzlesX != null && cachedTabPuzzlesY != null ->
                     cachedTabPuzzlesX!! to cachedTabPuzzlesY!!
+                config.calibratedLandsY != -1f && screenWidth > 0f ->
+                    (screenWidth * 0.17f) to config.calibratedLandsY
                 else -> null
             }
             MarketTab.LANDS -> when {
@@ -238,6 +244,8 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                     config.calibratedLandsX to config.calibratedLandsY
                 cachedTabLandsX != null && cachedTabLandsY != null ->
                     cachedTabLandsX!! to cachedTabLandsY!!
+                config.calibratedPuzzlesY != -1f && screenWidth > 0f ->
+                    (screenWidth * 0.50f) to config.calibratedPuzzlesY
                 else -> null
             }
         }
@@ -328,8 +336,8 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             alternateTab = if (targetTab == MarketTab.PUZZLES) MarketTab.LANDS else MarketTab.PUZZLES
         }
 
-        val needCoordsDiscovery = getTabCoordinates(targetTab, config) == null ||
-            ((config.switchBetweenTabs || isMultiTab) && getTabCoordinates(alternateTab, config) == null)
+        val needCoordsDiscovery = getTabCoordinates(targetTab, config, screenWidth) == null ||
+            ((config.switchBetweenTabs || isMultiTab) && getTabCoordinates(alternateTab, config, screenWidth) == null)
 
         // Step 0: Only run pre-switch OCR when discovering tab coords or when a modal check is flagged.
         // Skipping this on regular scans keeps tab-switching directly proportional to the user's slider.
@@ -374,8 +382,8 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             }
         }
 
-        val targetCoords = getTabCoordinates(targetTab, config)
-        val altCoords = getTabCoordinates(alternateTab, config)
+        val targetCoords = getTabCoordinates(targetTab, config, screenWidth)
+        val altCoords = getTabCoordinates(alternateTab, config, screenWidth)
 
         if (targetCoords == null) {
             checkModalBeforeSwitch = true
@@ -398,7 +406,7 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             clickAtWithRandomization(targetCoords.first, targetCoords.second, config)
             delay(settleDelay)
         } else if (config.switchBetweenTabs && altCoords != null) {
-            val bounceDelay = minOf(60L, maxOf(42L, config.tabSwitchIntervalMs / 4))
+            val bounceDelay = minOf(75L, maxOf(55L, config.tabSwitchIntervalMs / 4))
             if (config.verboseOcrLogging) {
                 BotLogs.addLog("🔀 Переключаемся в игре: ${alternateTab.tabLabel} (${bounceDelay} мс) -> ${targetTab.tabLabel} (${settleDelay} мс)")
             }

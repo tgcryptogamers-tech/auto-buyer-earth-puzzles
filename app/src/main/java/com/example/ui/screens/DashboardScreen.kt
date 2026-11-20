@@ -462,7 +462,8 @@ fun DashboardScreen(
                     MarketTabsStripPreview(
                         buyPuzzles = config.buyPuzzles,
                         buyLands = config.buyLands,
-                        switchBetweenTabs = config.switchBetweenTabs
+                        switchBetweenTabs = config.switchBetweenTabs,
+                        onToggleTabSwitching = onToggleTabSwitching
                     )
 
                     Row(

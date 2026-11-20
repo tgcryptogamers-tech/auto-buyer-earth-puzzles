@@ -250,14 +250,18 @@ fun MarketTabsStripPreview(
     buyPuzzles: Boolean,
     buyLands: Boolean,
     switchBetweenTabs: Boolean,
+    onToggleTabSwitching: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val activeSummary = when {
-        buyPuzzles && buyLands -> "Покупка: Puzzles + Lands"
-        switchBetweenTabs -> "Puzzles ↔ Lands"
-        buyLands -> "Фикс: Lands"
-        else -> "Фикс: Puzzles"
+        buyPuzzles && buyLands -> "Переключение: Puzzles ↔ Lands (обе покупаются)"
+        switchBetweenTabs -> "Переключение: Puzzles ↔ Lands (обновление рынка)"
+        buyLands -> "Фикс: только Lands"
+        else -> "Фикс: только Puzzles"
     }
+
+    val puzzlesSwitchOnly = !buyPuzzles && switchBetweenTabs
+    val landsSwitchOnly = !buyLands && switchBetweenTabs
 
     Column(
         modifier = modifier
@@ -273,15 +277,45 @@ fun MarketTabsStripPreview(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Вкладки рынка MoneyMining",
+                text = "Вкладки в игре",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(
-                text = activeSummary,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.secondary
-            )
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = if (switchBetweenTabs || (buyPuzzles && buyLands)) {
+                    MaterialTheme.colorScheme.tertiaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                border = BorderStroke(
+                    1.dp,
+                    if (switchBetweenTabs || (buyPuzzles && buyLands)) {
+                        MaterialTheme.colorScheme.tertiary
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    }
+                ),
+                modifier = if (onToggleTabSwitching != null && !(buyPuzzles && buyLands)) {
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable { onToggleTabSwitching(!switchBetweenTabs) }
+                        .testTag("strip_switch_badge")
+                } else {
+                    Modifier
+                }
+            ) {
+                Text(
+                    text = activeSummary,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (switchBetweenTabs || (buyPuzzles && buyLands)) {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
         }
 
         Row(
@@ -290,20 +324,41 @@ fun MarketTabsStripPreview(
         ) {
             MarketStripTabItem(
                 label = "Puzzles",
-                isActive = buyPuzzles,
-                isTarget = buyPuzzles,
+                roleHint = when {
+                    buyPuzzles -> "Покупка"
+                    puzzlesSwitchOnly -> "⇄ Перекл."
+                    else -> "Выкл"
+                },
+                isBuying = buyPuzzles,
+                isSwitchPartner = puzzlesSwitchOnly,
+                onClick = if (onToggleTabSwitching != null && !buyPuzzles) {
+                    { onToggleTabSwitching(!switchBetweenTabs) }
+                } else {
+                    null
+                },
                 modifier = Modifier.weight(1f)
             )
             MarketStripTabItem(
                 label = "Lands",
-                isActive = buyLands,
-                isTarget = buyLands,
+                roleHint = when {
+                    buyLands -> "Покупка"
+                    landsSwitchOnly -> "⇄ Перекл."
+                    else -> "Выкл"
+                },
+                isBuying = buyLands,
+                isSwitchPartner = landsSwitchOnly,
+                onClick = if (onToggleTabSwitching != null && !buyLands) {
+                    { onToggleTabSwitching(!switchBetweenTabs) }
+                } else {
+                    null
+                },
                 modifier = Modifier.weight(1f)
             )
             MarketStripTabItem(
                 label = "Bricks",
-                isActive = false,
-                isTarget = false,
+                roleHint = "Не исп.",
+                isBuying = false,
+                isSwitchPartner = false,
                 enabled = false,
                 modifier = Modifier.weight(1f)
             )
@@ -314,20 +369,27 @@ fun MarketTabsStripPreview(
 @Composable
 private fun MarketStripTabItem(
     label: String,
-    isActive: Boolean,
-    isTarget: Boolean,
+    roleHint: String,
+    isBuying: Boolean,
+    isSwitchPartner: Boolean,
     enabled: Boolean = true,
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val brush = if (isActive) {
-        Brush.horizontalGradient(
+    val brush = when {
+        isBuying -> Brush.horizontalGradient(
             listOf(
                 MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
                 MaterialTheme.colorScheme.primaryContainer
             )
         )
-    } else {
-        Brush.horizontalGradient(
+        isSwitchPartner -> Brush.horizontalGradient(
+            listOf(
+                MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.85f),
+                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+            )
+        )
+        else -> Brush.horizontalGradient(
             listOf(
                 MaterialTheme.colorScheme.surface,
                 MaterialTheme.colorScheme.surface
@@ -335,36 +397,67 @@ private fun MarketStripTabItem(
         )
     }
 
-    Box(
+    val borderStroke = when {
+        isBuying -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+        isSwitchPartner -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.secondary)
+        else -> BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    }
+
+    Surface(
         modifier = modifier
-            .height(44.dp)
+            .height(50.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(brush),
-        contentAlignment = Alignment.Center
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        shape = RoundedCornerShape(8.dp),
+        border = borderStroke,
+        color = MaterialTheme.colorScheme.surface
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .background(brush),
+            contentAlignment = Alignment.Center
         ) {
-            if (isTarget) {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.secondary)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-            }
-            Text(
-                text = label,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = when {
-                    !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-                    isActive -> MaterialTheme.colorScheme.secondary
-                    else -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.78f)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    if (isBuying) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.secondary)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                    }
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = when {
+                            !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                            isBuying || isSwitchPartner -> MaterialTheme.colorScheme.secondary
+                            else -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.65f)
+                        }
+                    )
                 }
-            )
+                Text(
+                    text = roleHint,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when {
+                        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        isBuying -> MaterialTheme.colorScheme.onPrimaryContainer
+                        isSwitchPartner -> MaterialTheme.colorScheme.secondary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
         }
     }
 }
