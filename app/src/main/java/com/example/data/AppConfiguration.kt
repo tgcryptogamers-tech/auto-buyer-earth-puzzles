@@ -19,6 +19,8 @@ data class AppConfiguration(
     @PrimaryKey val id: Int = 1,
     val buyTarget: String = MarketTab.PUZZLES.tabLabel,
     val switchBetweenTabs: Boolean = true,
+    val autoBuyEnabled: Boolean = false,
+    val isCalibrationEnabled: Boolean = false,
     val priceThreshold: Double = 100.0,
     val usePriceThreshold: Boolean = true,
     val isLessThanOperator: Boolean = true,

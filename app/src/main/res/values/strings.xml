@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">Earth Puzzles</string>
+    <string name="accessibility_description">Позволяет боту Earth Puzzles переключать вкладки Puzzles и Lands и нажимать на подходящие лоты в игре.</string>
     <string name="nav_dashboard">Панель</string>
     <string name="nav_settings">Настройки</string>
     <string name="nav_logs">Логи</string>
@@ -7,7 +8,6 @@
     <string name="tab_lands">Lands</string>
     <string name="buy_target_puzzles">Только Puzzles</string>
     <string name="buy_target_lands">Только Lands</string>
-    <string name="action_pick_screenshot">Анализ скриншота (OCR)</string>
     <string name="action_start_monitor">Запустить мониторинг</string>
     <string name="action_stop_monitor">Остановить мониторинг</string>
 </resources>

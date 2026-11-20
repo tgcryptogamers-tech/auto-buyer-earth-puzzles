@@ -12,17 +12,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachMoney
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -44,8 +49,6 @@ import androidx.compose.ui.unit.dp
 import com.example.data.AppConfiguration
 import com.example.data.MarketTab
 import com.example.ui.components.BuyTargetSelector
-import com.example.ui.components.CalibrationBoardCard
-import com.example.ui.components.CalibrationTarget
 import com.example.ui.components.MarketTabsStripPreview
 import com.example.ui.components.SectionCard
 import kotlin.math.abs
@@ -54,6 +57,7 @@ import kotlin.math.abs
 fun SettingsScreen(
     config: AppConfiguration,
     onUpdateConfig: ((AppConfiguration) -> AppConfiguration) -> Unit,
+    onToggleCalibration: (Boolean) -> Unit,
     onResetCoordinates: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -113,12 +117,12 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
-                                text = "Вкладки и цель покупки",
+                                text = "Вкладки игры: Puzzles и Lands",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Две рабочие вкладки: Puzzles и Lands. Выберите, что именно покупать.",
+                                text = "Выберите, что бот должен покупать в игре: только пазлы или только землю.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -133,9 +137,9 @@ fun SettingsScreen(
                     )
 
                     SettingsSwitchRow(
-                        title = "Переключение между Puzzles и Lands",
+                        title = "Переключение вкладок Puzzles ↔ Lands в игре",
                         subtitle = if (config.switchBetweenTabs) {
-                            "Бот переключается между вкладками Puzzles ↔ Lands, но покупает только ${selectedTarget.tabLabel}"
+                            "Бот переключается между Puzzles и Lands для обновления рынка, но покупает только ${selectedTarget.tabLabel}"
                         } else {
                             "Оставаться только на вкладке ${selectedTarget.tabLabel}"
                         },
@@ -154,7 +158,77 @@ fun SettingsScreen(
                 }
             }
 
-            // 2. Price Threshold & Buy Execution Mode
+            // 2. On-Screen Game Calibration via Floating Bubble
+            item {
+                SectionCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = "Калибровка",
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Калибровка вкладок в игре",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Включите, сверните бот в игру и нажмите на жёлтый кружок, чтобы указать Puzzles и Lands прямо в окне игры.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    SettingsSwitchRow(
+                        title = "Режим калибровки кружком",
+                        subtitle = if (config.isCalibrationEnabled) {
+                            "ГОТОВ! Перейдите в игру и нажмите жёлтый кружок"
+                        } else {
+                            "Нажмите, чтобы задать координаты Puzzles и Lands поверх игры"
+                        },
+                        checked = config.isCalibrationEnabled,
+                        onCheckedChange = onToggleCalibration,
+                        testTag = "settings_calibration_toggle"
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = formatCoord("Вкладка Puzzles", config.calibratedPuzzlesX, config.calibratedPuzzlesY),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = formatCoord("Вкладка Lands", config.calibratedLandsX, config.calibratedLandsY),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onResetCoordinates,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("reset_coordinates_button"),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Сбросить координаты (авто-OCR)")
+                    }
+                }
+            }
+
+            // 3. Price Threshold & Buy Execution Mode
             item {
                 SectionCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -165,15 +239,25 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Порог цены и режим сделки",
+                            text = "Порог цены и реальная покупка",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
 
                     SettingsSwitchRow(
+                        title = "Выполнять автоматическую покупку",
+                        subtitle = if (config.enableActualBuying) "Режим ПОКУПКИ (клики по лоту и Buy активны)" else "Режим МОНИТОРИНГА (только логирование без кликов покупки)",
+                        checked = config.enableActualBuying,
+                        onCheckedChange = { checked ->
+                            onUpdateConfig { it.copy(enableActualBuying = checked) }
+                        },
+                        testTag = "settings_enable_buying_toggle"
+                    )
+
+                    SettingsSwitchRow(
                         title = "Фильтр по порогу цены",
-                        subtitle = if (config.usePriceThreshold) "Покупать только при совпадении условия цены" else "Покупать любой лот на выбранной вкладке",
+                        subtitle = if (config.usePriceThreshold) "Покупать только по заданному порогу" else "Покупать любой доступный лот",
                         checked = config.usePriceThreshold,
                         onCheckedChange = { checked ->
                             onUpdateConfig { it.copy(usePriceThreshold = checked) }
@@ -222,18 +306,8 @@ fun SettingsScreen(
                     }
 
                     SettingsSwitchRow(
-                        title = "Фиксировать сделки в историю",
-                        subtitle = if (config.enableActualBuying) "Активный режим (сохраняет найденные лоты как покупки)" else "Режим мониторинга (только логирование)",
-                        checked = config.enableActualBuying,
-                        onCheckedChange = { checked ->
-                            onUpdateConfig { it.copy(enableActualBuying = checked) }
-                        },
-                        testTag = "settings_enable_buying_toggle"
-                    )
-
-                    SettingsSwitchRow(
-                        title = "Подробный лог сканирования",
-                        subtitle = if (config.verboseOcrLogging) "Логировать каждое переключение и отклонённые цены" else "Только ключевые события и совпадения",
+                        title = "Подробный лог OCR (Отладка)",
+                        subtitle = if (config.verboseOcrLogging) "Показывать все распознанные строки" else "Только важные события",
                         checked = config.verboseOcrLogging,
                         onCheckedChange = { checked ->
                             onUpdateConfig { it.copy(verboseOcrLogging = checked) }
@@ -243,7 +317,7 @@ fun SettingsScreen(
                 }
             }
 
-            // 3. Timings & Randomization
+            // 4. Timings & Randomization
             item {
                 SectionCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -262,7 +336,7 @@ fun SettingsScreen(
 
                     Column {
                         Text(
-                            text = "Интервал переключения вкладок: ${config.tabSwitchIntervalMs} мс",
+                            text = "Задержка переключения вкладок: ${config.tabSwitchIntervalMs} мс",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -278,7 +352,7 @@ fun SettingsScreen(
 
                     Column {
                         Text(
-                            text = "Интервал сканирования лотов: ${config.scanIntervalMs} мс",
+                            text = "Интервал сканирования экрана: ${config.scanIntervalMs} мс",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -326,7 +400,7 @@ fun SettingsScreen(
                 }
             }
 
-            // 4. Search Cycles (Циклы 1..3)
+            // 5. Search Cycles
             item {
                 SectionCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -344,8 +418,8 @@ fun SettingsScreen(
                     }
 
                     SettingsSwitchRow(
-                        title = "Использовать 3 цикла поиска",
-                        subtitle = if (config.useSearchCycles) "Автоматический переход между циклами со случайным сдвигом" else "Непрерывное сканирование",
+                        title = "Использовать циклы с перезагрузкой",
+                        subtitle = if (config.useSearchCycles) "Автоперезагрузка страницы при отсутствии покупок" else "Непрерывное сканирование",
                         checked = config.useSearchCycles,
                         onCheckedChange = { checked ->
                             onUpdateConfig { it.copy(useSearchCycles = checked) }
@@ -408,24 +482,15 @@ fun SettingsScreen(
                     }
                 }
             }
-
-            // 5. Coordinate Calibration for Puzzles, Lands & Confirm
-            item {
-                CalibrationBoardCard(
-                    config = config,
-                    onCalibrateCoordinate = { target, x, y ->
-                        onUpdateConfig { cfg ->
-                            when (target) {
-                                CalibrationTarget.PUZZLES -> cfg.copy(calibratedPuzzlesX = x, calibratedPuzzlesY = y)
-                                CalibrationTarget.LANDS -> cfg.copy(calibratedLandsX = x, calibratedLandsY = y)
-                                CalibrationTarget.CONFIRM -> cfg.copy(calibratedConfirmX = x, calibratedConfirmY = y)
-                            }
-                        }
-                    },
-                    onResetCoordinates = onResetCoordinates
-                )
-            }
         }
+    }
+}
+
+private fun formatCoord(label: String, x: Float, y: Float): String {
+    return if (x >= 0f && y >= 0f) {
+        "• $label: (${x.toInt()}, ${y.toInt()})"
+    } else {
+        "• $label: авто (OCR по скриншоту)"
     }
 }
 

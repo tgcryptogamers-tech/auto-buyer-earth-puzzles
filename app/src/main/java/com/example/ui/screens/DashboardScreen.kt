@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,15 +20,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DocumentScanner
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -48,23 +51,28 @@ import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.AppConfiguration
 import com.example.data.MarketTab
-import com.example.engine.MarketMonitorState
 import com.example.ui.components.BuyTargetSelector
 import com.example.ui.components.MarketTabsStripPreview
 import com.example.ui.components.SectionCard
-import com.example.viewmodel.OcrAnalysisUiState
 
 @Composable
 fun DashboardScreen(
     config: AppConfiguration,
-    monitorState: MarketMonitorState,
-    ocrState: OcrAnalysisUiState,
+    isAccessibilityEnabled: Boolean,
+    isOverlayGranted: Boolean,
+    isScreenCaptureAuthorized: Boolean,
+    isOverlayRunning: Boolean,
+    cooldownRemainingSec: Long,
     purchasesCount: Int,
+    onOpenAccessibilitySettings: () -> Unit,
+    onOpenOverlaySettings: () -> Unit,
+    onRequestScreenCapture: () -> Unit,
+    onLaunchOverlay: () -> Unit,
+    onStopOverlay: () -> Unit,
+    onToggleMonitoring: () -> Unit,
+    onResetCooldown: () -> Unit,
     onSelectBuyTarget: (MarketTab) -> Unit,
     onToggleTabSwitching: (Boolean) -> Unit,
-    onToggleMonitor: () -> Unit,
-    onPickScreenshot: () -> Unit,
-    onApplyOcrCoords: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -86,12 +94,12 @@ fun DashboardScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(164.dp)
+                        .height(152.dp)
                         .clip(MaterialTheme.shapes.large)
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.img_market_banner),
-                        contentDescription = "Earth Puzzles Market Banner",
+                        contentDescription = "Earth Puzzles Banner",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
@@ -120,7 +128,7 @@ fun DashboardScreen(
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(50),
-                                color = if (monitorState.isRunning) {
+                                color = if (config.autoBuyEnabled) {
                                     MaterialTheme.colorScheme.primaryContainer
                                 } else {
                                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
@@ -135,13 +143,13 @@ fun DashboardScreen(
                                             .size(8.dp)
                                             .clip(CircleShape)
                                             .background(
-                                                if (monitorState.isRunning) MaterialTheme.colorScheme.primary
+                                                if (config.autoBuyEnabled) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.secondary
                                             )
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = if (monitorState.isRunning) "МОНИТОРИНГ АКТИВЕН" else "ОЖИДАНИЕ",
+                                        text = if (config.autoBuyEnabled) "БОТ АКТИВЕН" else "ОЖИДАНИЕ",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -153,7 +161,7 @@ fun DashboardScreen(
                                 color = MaterialTheme.colorScheme.secondaryContainer
                             ) {
                                 Text(
-                                    text = "Сделок: $purchasesCount",
+                                    text = "Покупок: $purchasesCount",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
@@ -168,7 +176,7 @@ fun DashboardScreen(
                                 color = MaterialTheme.colorScheme.onBackground
                             )
                             Text(
-                                text = "Бот-конфигуратор и OCR-монитор вкладок Puzzles ↔ Lands",
+                                text = "Авто-покупка в игре: переключение Puzzles ↔ Lands",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -177,7 +185,161 @@ fun DashboardScreen(
                 }
             }
 
-            // Quick Tabs & Buy Target Configuration Card
+            // System Permissions Section
+            item {
+                SectionCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Security,
+                            contentDescription = "Разрешения",
+                            tint = MaterialTheme.colorScheme.tertiary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Разрешения для работы в игре",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    PermissionRow(
+                        title = "Accessibility Service (Клики в игре)",
+                        description = "Нужно для переключения вкладок Puzzles/Lands и кликов по лотам.",
+                        isGranted = isAccessibilityEnabled,
+                        onClick = onOpenAccessibilitySettings,
+                        testTag = "perm_accessibility_row"
+                    )
+
+                    PermissionRow(
+                        title = "Поверх других приложений (Кружок)",
+                        description = "Отображает плавающий кружок управления поверх окна игры.",
+                        isGranted = isOverlayGranted,
+                        onClick = onOpenOverlaySettings,
+                        testTag = "perm_overlay_row"
+                    )
+
+                    PermissionRow(
+                        title = "Захват экрана (OCR Screen Capture)",
+                        description = "Нужно для распознавания цен и вкладок на экране игры.",
+                        isGranted = isScreenCaptureAuthorized,
+                        onClick = onRequestScreenCapture,
+                        testTag = "perm_capture_row"
+                    )
+                }
+            }
+
+            // Floating Bubble & Start/Stop Automation Controls
+            item {
+                SectionCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Layers,
+                                contentDescription = "Кружок",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Плавающий кружок и запуск",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Text(
+                            text = if (isOverlayRunning) "Кружок: ВКЛ" else "Скрыт",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isOverlayRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Text(
+                        text = "Короткое нажатие на кружок запускает/ставит на паузу бота в игре; долгое нажатие открывает панель логов.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onLaunchOverlay,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("launch_overlay_btn"),
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text("ПОКАЗАТЬ КРУЖОК", style = MaterialTheme.typography.labelLarge)
+                        }
+                        OutlinedButton(
+                            onClick = onStopOverlay,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("stop_overlay_btn"),
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text("СКРЫТЬ КРУЖОК", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+
+                    if (cooldownRemainingSec > 0) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(MaterialTheme.shapes.small)
+                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Пауза после покупки: ${cooldownRemainingSec}с",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            OutlinedButton(onClick = onResetCooldown) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Сброс")
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = onToggleMonitoring,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("toggle_monitor_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (config.autoBuyEnabled) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            }
+                        ),
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Icon(
+                            imageVector = if (config.autoBuyEnabled) Icons.Default.Stop else Icons.Default.PlayArrow,
+                            contentDescription = null
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (config.autoBuyEnabled) "ОСТАНОВИТЬ МОНИТОРИНГ" else "ЗАПУСТИТЬ МОНИТОРИНГ",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+            }
+
+            // Quick Tabs & Buy Target Configuration
             item {
                 SectionCard {
                     Row(
@@ -187,12 +349,12 @@ fun DashboardScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Выбор цели покупки",
+                                text = "Что покупаем в игре",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Покупать только пазлы (Puzzles) или только землю (Lands)",
+                                text = "Либо только Puzzles (пазлы земли), либо только Lands (земля)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -201,13 +363,9 @@ fun DashboardScreen(
                             onClick = onOpenSettings,
                             modifier = Modifier.testTag("open_settings_shortcut")
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Tune,
-                                contentDescription = "Открыть настройки",
-                                modifier = Modifier.size(16.dp)
-                            )
+                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Все", style = MaterialTheme.typography.labelLarge)
+                            Text("Настройки")
                         }
                     }
 
@@ -221,6 +379,7 @@ fun DashboardScreen(
                             .fillMaxWidth()
                             .clip(MaterialTheme.shapes.small)
                             .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { onToggleTabSwitching(!config.switchBetweenTabs) }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
@@ -231,18 +390,18 @@ fun DashboardScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.SwapHoriz,
-                                contentDescription = "Переключение вкладок",
+                                contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "Переключение Puzzles ↔ Lands",
+                                    text = "Переключение вкладок Puzzles ↔ Lands",
                                     style = MaterialTheme.typography.titleSmall,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Обновляет рынок каждые ${config.tabSwitchIntervalMs} мс (±${config.tabSwitchRandomizationMs} мс)",
+                                    text = "Обновляет рынок в игре (${config.tabSwitchIntervalMs} мс)",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -256,243 +415,10 @@ fun DashboardScreen(
                     }
 
                     MarketTabsStripPreview(
-                        activeTab = if (monitorState.isRunning) monitorState.activeTab else selectedTarget,
+                        activeTab = selectedTarget,
                         buyTarget = selectedTarget,
                         switchBetweenTabs = config.switchBetweenTabs
                     )
-                }
-            }
-
-            // Live Monitor Runner & Metrics
-            item {
-                SectionCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Мониторинг и циклы",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (config.usePriceThreshold) {
-                                val op = if (config.isLessThanOperator) "≤" else "≥"
-                                "Порог: $op ${config.priceThreshold} MM"
-                            } else {
-                                "Порог: отключен"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        MetricTile(
-                            label = "Сканов",
-                            value = monitorState.scanCount.toString(),
-                            modifier = Modifier.weight(1f)
-                        )
-                        MetricTile(
-                            label = "Найдено",
-                            value = monitorState.matchedLotsCount.toString(),
-                            modifier = Modifier.weight(1f)
-                        )
-                        MetricTile(
-                            label = if (config.useSearchCycles) "Цикл ${monitorState.currentCycle}" else "Режим",
-                            value = if (config.useSearchCycles && monitorState.isRunning) {
-                                "${monitorState.cycleRemainingSec}с"
-                            } else if (config.enableActualBuying) {
-                                "Покупка"
-                            } else {
-                                "Лог"
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Text(
-                        text = monitorState.lastEventMessage,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Button(
-                        onClick = onToggleMonitor,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                            .testTag("toggle_monitor_button"),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (monitorState.isRunning) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            }
-                        ),
-                        shape = MaterialTheme.shapes.medium
-                    ) {
-                        Icon(
-                            imageVector = if (monitorState.isRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
-                            contentDescription = null
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (monitorState.isRunning) "ОСТАНОВИТЬ МОНИТОРИНГ" else "ЗАПУСТИТЬ МОНИТОРИНГ",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                }
-            }
-
-            // Zero-permission Photo Picker OCR Scanner
-            item {
-                SectionCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.DocumentScanner,
-                            contentDescription = "OCR анализ",
-                            tint = MaterialTheme.colorScheme.secondary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "OCR-анализ скриншота рынка",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Распознает вкладки Puzzles и Lands, координаты и цены лотов (ML Kit)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = onPickScreenshot,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("pick_screenshot_button"),
-                        shape = MaterialTheme.shapes.medium
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DocumentScanner,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Выбрать скриншот игры", style = MaterialTheme.typography.labelLarge)
-                    }
-
-                    when (ocrState) {
-                        is OcrAnalysisUiState.Idle -> Unit
-                        is OcrAnalysisUiState.Analyzing -> {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                Text(
-                                    text = "Распознавание вкладок и цен...",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                        is OcrAnalysisUiState.Error -> {
-                            Text(
-                                text = "Ошибка OCR: ${ocrState.message}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                        is OcrAnalysisUiState.Success -> {
-                            val res = ocrState.result
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(MaterialTheme.shapes.small)
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = "Размер: ${res.imageWidth}×${res.imageHeight} | Активная вкладка: ${res.activeTabDetected?.tabLabel ?: "не определена"}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                res.detectedTabs.forEach { tab ->
-                                    Text(
-                                        text = "• ${tab.tab.tabLabel}: (${tab.centerX.toInt()}, ${tab.centerY.toInt()})",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                if (res.showedSummary != null) {
-                                    Text(
-                                        text = "Статус экрана: ${res.showedSummary}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
-                                Text(
-                                    text = "Найдено числовых цен: ${res.lotCandidates.size}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                res.lotCandidates.take(4).forEach { lot ->
-                                    Text(
-                                        text = "  ${String.format("%.4f", lot.parsedPrice)} MM (${if (lot.matchesThreshold) "подходит" else "выше/ниже порога"})",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (lot.matchesThreshold) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                if (res.detectedTabs.isNotEmpty()) {
-                                    Button(
-                                        onClick = onApplyOcrCoords,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("apply_ocr_coords_button"),
-                                        shape = MaterialTheme.shapes.small
-                                    ) {
-                                        Text("Сохранить координаты Puzzles / Lands")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Creator Program Compliance Note
-            item {
-                Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Сборка соответствует Google Play Creator Program (без AccessibilityService и системных оверлеев поверх сторонних приложений).",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
             }
         }
@@ -500,27 +426,43 @@ fun DashboardScreen(
 }
 
 @Composable
-private fun MetricTile(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
+private fun PermissionRow(
+    title: String,
+    description: String,
+    isGranted: Boolean,
+    onClick: () -> Unit,
+    testTag: String
 ) {
-    Column(
-        modifier = modifier
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .clickable(onClick = onClick)
+            .padding(12.dp)
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.Bold
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Icon(
+            imageVector = if (isGranted) Icons.Default.CheckCircle else Icons.Default.Warning,
+            contentDescription = if (isGranted) "Выдано" else "Требуется",
+            tint = if (isGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(24.dp)
         )
     }
 }

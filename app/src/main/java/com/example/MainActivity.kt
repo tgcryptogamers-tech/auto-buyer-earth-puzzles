@@ -1,12 +1,17 @@
 package com.example
 
+import android.content.Context
+import android.content.Intent
+import android.media.projection.MediaProjectionManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -37,12 +42,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.service.MediaProjectionHelper
+import com.example.service.OverlayControlService
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.LogsAndHistoryScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.MainViewModel
-import com.example.viewmodel.OcrAnalysisUiState
 
 private enum class AppDestination(
     val label: String,
@@ -57,35 +63,113 @@ private enum class AppDestination(
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
+    private lateinit var mediaProjectionManager: MediaProjectionManager
+
+    private val screenCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val serviceIntent = Intent(this, OverlayControlService::class.java).apply {
+                action = OverlayControlService.ACTION_START_PROJECTION
+                putExtra(OverlayControlService.EXTRA_RESULT_CODE, result.resultCode)
+                putExtra(OverlayControlService.EXTRA_DATA, result.data)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+
+            try {
+                val projection = mediaProjectionManager.getMediaProjection(result.resultCode, result.data!!)
+                if (projection != null) {
+                    MediaProjectionHelper.initProjection(projection, applicationContext)
+                    viewModel.checkPermissions()
+                    Toast.makeText(this, "Захват экрана для OCR включён!", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this, "Ошибка MediaProjection: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        } else {
+            Toast.makeText(this, "Для чтения вкладок и цен в игре нужен захват экрана.", Toast.LENGTH_LONG).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme(darkTheme = true) {
-                EarthPuzzlesApp(viewModel = viewModel)
+                EarthPuzzlesApp(
+                    viewModel = viewModel,
+                    onOpenAccessibilitySettings = {
+                        try {
+                            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            Toast.makeText(this, "Найдите 'Earth Puzzles' и включите его", Toast.LENGTH_LONG).show()
+                        } catch (_: Exception) {
+                            Toast.makeText(this, "Не удалось открыть настройки Accessibility", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onOpenOverlaySettings = {
+                        try {
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:$packageName")
+                                )
+                            )
+                        } catch (_: Exception) {
+                            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+                        }
+                    },
+                    onRequestScreenCapture = {
+                        val intent = mediaProjectionManager.createScreenCaptureIntent()
+                        screenCaptureLauncher.launch(intent)
+                    },
+                    onLaunchOverlay = {
+                        if (!Settings.canDrawOverlays(this)) {
+                            Toast.makeText(this, "Сначала выдайте разрешение Overlay!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            viewModel.startOverlayService()
+                        }
+                    },
+                    onToggleMonitoring = {
+                        val message = viewModel.toggleMonitoringAndOverlay()
+                        if (message != null) {
+                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.checkPermissions()
     }
 }
 
 @Composable
-private fun EarthPuzzlesApp(viewModel: MainViewModel) {
+private fun EarthPuzzlesApp(
+    viewModel: MainViewModel,
+    onOpenAccessibilitySettings: () -> Unit,
+    onOpenOverlaySettings: () -> Unit,
+    onRequestScreenCapture: () -> Unit,
+    onLaunchOverlay: () -> Unit,
+    onToggleMonitoring: () -> Unit
+) {
     val config by viewModel.configuration.collectAsStateWithLifecycle()
-    val monitorState by viewModel.monitorState.collectAsStateWithLifecycle()
-    val ocrState by viewModel.ocrState.collectAsStateWithLifecycle()
+    val isAccessibilityEnabled by viewModel.accessibilityEnabled.collectAsStateWithLifecycle()
+    val isOverlayGranted by viewModel.overlayGranted.collectAsStateWithLifecycle()
+    val isScreenCaptureAuthorized by viewModel.screenCaptureAuthorized.collectAsStateWithLifecycle()
+    val isOverlayRunning by viewModel.overlayRunning.collectAsStateWithLifecycle()
+    val cooldownRemainingSec by viewModel.cooldownRemainingSec.collectAsStateWithLifecycle()
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val purchases by viewModel.purchases.collectAsStateWithLifecycle()
 
     var currentDestination by rememberSaveable { mutableStateOf(AppDestination.DASHBOARD) }
-
-    val photoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
-            viewModel.analyzeScreenshot(uri)
-        }
-    }
 
     if (currentDestination != AppDestination.DASHBOARD) {
         BackHandler {
@@ -149,23 +233,21 @@ private fun EarthPuzzlesApp(viewModel: MainViewModel) {
                     AppDestination.DASHBOARD -> {
                         DashboardScreen(
                             config = config,
-                            monitorState = monitorState,
-                            ocrState = ocrState,
+                            isAccessibilityEnabled = isAccessibilityEnabled,
+                            isOverlayGranted = isOverlayGranted,
+                            isScreenCaptureAuthorized = isScreenCaptureAuthorized,
+                            isOverlayRunning = isOverlayRunning,
+                            cooldownRemainingSec = cooldownRemainingSec,
                             purchasesCount = purchases.size,
+                            onOpenAccessibilitySettings = onOpenAccessibilitySettings,
+                            onOpenOverlaySettings = onOpenOverlaySettings,
+                            onRequestScreenCapture = onRequestScreenCapture,
+                            onLaunchOverlay = onLaunchOverlay,
+                            onStopOverlay = viewModel::stopOverlayService,
+                            onToggleMonitoring = onToggleMonitoring,
+                            onResetCooldown = viewModel::resetCooldown,
                             onSelectBuyTarget = viewModel::setBuyTarget,
                             onToggleTabSwitching = viewModel::setTabSwitchingEnabled,
-                            onToggleMonitor = viewModel::toggleMonitor,
-                            onPickScreenshot = {
-                                photoPickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            },
-                            onApplyOcrCoords = {
-                                val state = ocrState
-                                if (state is OcrAnalysisUiState.Success) {
-                                    viewModel.applyOcrCoordinates(state.result)
-                                }
-                            },
                             onOpenSettings = { currentDestination = AppDestination.SETTINGS }
                         )
                     }
@@ -174,6 +256,7 @@ private fun EarthPuzzlesApp(viewModel: MainViewModel) {
                         SettingsScreen(
                             config = config,
                             onUpdateConfig = viewModel::updateConfiguration,
+                            onToggleCalibration = viewModel::setCalibrationEnabled,
                             onResetCoordinates = viewModel::resetCoordinates
                         )
                     }
