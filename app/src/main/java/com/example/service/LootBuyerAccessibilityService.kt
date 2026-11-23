@@ -76,11 +76,22 @@ class LootBuyerAccessibilityService : AccessibilityService() {
         const val CONFIRMATION_INITIAL_DELAY_MS = 130L
 
         @Volatile
+        var liveTabSwitchIntervalMs: Long = -1L
+
+        @Volatile
+        var liveScanIntervalMs: Long = -1L
+
+        @Volatile
         var instance: LootBuyerAccessibilityService? = null
             private set
 
         val isServiceRunning: Boolean
             get() = instance != null
+
+        fun updateLiveTimings(tabSwitchMs: Long? = null, scanMs: Long? = null) {
+            if (tabSwitchMs != null) liveTabSwitchIntervalMs = tabSwitchMs
+            if (scanMs != null) liveScanIntervalMs = scanMs
+        }
 
         fun getCooldownRemainingMs(): Long {
             val inst = instance ?: return 0L
@@ -148,6 +159,8 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                 val db = AppDatabase.getDatabase(applicationContext)
                 val initialCfg = db.configurationDao().getConfiguration()
                 if (initialCfg != null) {
+                    liveTabSwitchIntervalMs = initialCfg.tabSwitchIntervalMs
+                    liveScanIntervalMs = initialCfg.scanIntervalMs
                     val modeText = if (initialCfg.enableActualBuying) "АВТОПОКУПКА ВКЛ" else "ТОЛЬКО МОНИТОРИНГ"
                     BotLogs.addLog("🎯 Цель: ${initialCfg.buyTargetSummary()} | Порог: ${initialCfg.priceThreshold} | $modeText")
                 }
@@ -160,15 +173,22 @@ class LootBuyerAccessibilityService : AccessibilityService() {
                         continue
                     }
 
-                    val config = db.configurationDao().getConfiguration()
-                    if (config == null || !config.autoBuyEnabled) {
+                    val rawConfig = db.configurationDao().getConfiguration()
+                    if (rawConfig == null || !rawConfig.autoBuyEnabled) {
                         delay(800)
                         continue
                     }
 
+                    val effectiveTabMs = if (liveTabSwitchIntervalMs > 0L) liveTabSwitchIntervalMs else rawConfig.tabSwitchIntervalMs
+                    val effectiveScanMs = if (liveScanIntervalMs >= 0L) liveScanIntervalMs else rawConfig.scanIntervalMs
+                    val config = rawConfig.copy(
+                        tabSwitchIntervalMs = effectiveTabMs,
+                        scanIntervalMs = effectiveScanMs
+                    )
+
                     if (config.tabSwitchIntervalMs != lastLoggedTabIntervalMs) {
                         lastLoggedTabIntervalMs = config.tabSwitchIntervalMs
-                        BotLogs.addLog("⏱ Задержка вкладок: ${config.tabSwitchIntervalMs} мс | Пауза цикла: ${config.scanIntervalMs} мс")
+                        BotLogs.addLog("⏱ Скорость переключения вкладок: ${config.tabSwitchIntervalMs} мс | Пауза цикла: ${config.scanIntervalMs} мс")
                     }
 
                     if (config.useSearchCycles) {
@@ -391,32 +411,35 @@ class LootBuyerAccessibilityService : AccessibilityService() {
             return@withContext false
         }
 
-        // Step 2: Switch tabs in game using exact user slider timing
+        // Step 2: Switch tabs in game strictly proportional to the user's speed slider
         val randDelta = if (config.tabSwitchRandomizationMs > 0) {
             Random.nextInt(-config.tabSwitchRandomizationMs, config.tabSwitchRandomizationMs + 1)
         } else 0
-        val settleDelay = (config.tabSwitchIntervalMs + randDelta).coerceAtLeast(20L)
+        val totalSwitchBudgetMs = (config.tabSwitchIntervalMs + randDelta).coerceAtLeast(80L)
         val switchedTabs = isMultiTab || (config.switchBetweenTabs && altCoords != null)
 
         if (isMultiTab) {
             nextMultiTabIndex++
             if (config.verboseOcrLogging) {
-                BotLogs.addLog("🔀 Обе вкладки: переходим на ${targetTab.tabLabel} (${settleDelay} мс)")
+                BotLogs.addLog("🔀 Обе вкладки: переходим на ${targetTab.tabLabel} (${totalSwitchBudgetMs} мс)")
             }
             clickAtWithRandomization(targetCoords.first, targetCoords.second, config)
-            delay(settleDelay)
+            delay(totalSwitchBudgetMs)
         } else if (config.switchBetweenTabs && altCoords != null) {
-            val bounceDelay = minOf(75L, maxOf(55L, config.tabSwitchIntervalMs / 4))
+            // Split the configured interval proportionally (~40% on alternate tab, ~60% settling on target tab)
+            // so the slider directly controls both the visible alternate-tab dwell and overall switch speed.
+            val bounceDelay = (totalSwitchBudgetMs * 0.40f).toLong().coerceIn(75L, 1200L)
+            val targetSettleDelay = (totalSwitchBudgetMs - bounceDelay).coerceAtLeast(80L)
             if (config.verboseOcrLogging) {
-                BotLogs.addLog("🔀 Переключаемся в игре: ${alternateTab.tabLabel} (${bounceDelay} мс) -> ${targetTab.tabLabel} (${settleDelay} мс)")
+                BotLogs.addLog("🔀 Переключаемся в игре: ${alternateTab.tabLabel} (${bounceDelay} мс) -> ${targetTab.tabLabel} (${targetSettleDelay} мс)")
             }
             clickAtWithRandomization(altCoords.first, altCoords.second, config)
             delay(bounceDelay)
             clickAtWithRandomization(targetCoords.first, targetCoords.second, config)
-            delay(settleDelay)
+            delay(targetSettleDelay)
         } else {
             clickAtWithRandomization(targetCoords.first, targetCoords.second, config)
-            delay(settleDelay)
+            delay(totalSwitchBudgetMs)
         }
 
         // Step 3: Read latest frame immediately and crop strictly to the market listing band (44%..91%)

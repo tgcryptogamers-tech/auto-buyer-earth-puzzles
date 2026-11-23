@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -58,6 +59,8 @@ import kotlin.math.abs
 fun SettingsScreen(
     config: AppConfiguration,
     onUpdateConfig: ((AppConfiguration) -> AppConfiguration) -> Unit,
+    onSetTabSwitchInterval: (Long, Boolean) -> Unit,
+    onSetScanInterval: (Long, Boolean) -> Unit,
     onToggleBuyTab: (MarketTab) -> Unit,
     onSelectBothBuyTabs: () -> Unit,
     onToggleCalibration: (Boolean) -> Unit,
@@ -65,46 +68,34 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     var tabSwitchSlider by remember {
-        mutableFloatStateOf(config.tabSwitchIntervalMs.toFloat().coerceIn(40f, 1500f))
+        mutableFloatStateOf(config.tabSwitchIntervalMs.toFloat().coerceIn(100f, 2500f))
     }
     var isDraggingTabSlider by remember { mutableStateOf(false) }
+    var lastTabEditAtMs by remember { mutableLongStateOf(0L) }
 
     var scanIntervalSlider by remember {
-        mutableFloatStateOf(config.scanIntervalMs.toFloat().coerceIn(0f, 1500f))
+        mutableFloatStateOf(config.scanIntervalMs.toFloat().coerceIn(0f, 2500f))
     }
     var isDraggingScanSlider by remember { mutableStateOf(false) }
+    var lastScanEditAtMs by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(config.tabSwitchIntervalMs) {
-        if (!isDraggingTabSlider) {
-            val target = config.tabSwitchIntervalMs.toFloat().coerceIn(40f, 1500f)
+        val recentlyEdited = System.currentTimeMillis() - lastTabEditAtMs < 600L
+        if (!isDraggingTabSlider && !recentlyEdited) {
+            val target = config.tabSwitchIntervalMs.toFloat().coerceIn(100f, 2500f)
             if (abs(tabSwitchSlider - target) >= 1f) {
                 tabSwitchSlider = target
             }
         }
     }
 
-    LaunchedEffect(tabSwitchSlider) {
-        val desired = tabSwitchSlider.toLong().coerceIn(40L, 1500L)
-        if (desired != config.tabSwitchIntervalMs) {
-            kotlinx.coroutines.delay(90L)
-            onUpdateConfig { it.copy(tabSwitchIntervalMs = desired) }
-        }
-    }
-
     LaunchedEffect(config.scanIntervalMs) {
-        if (!isDraggingScanSlider) {
-            val target = config.scanIntervalMs.toFloat().coerceIn(0f, 1500f)
+        val recentlyEdited = System.currentTimeMillis() - lastScanEditAtMs < 600L
+        if (!isDraggingScanSlider && !recentlyEdited) {
+            val target = config.scanIntervalMs.toFloat().coerceIn(0f, 2500f)
             if (abs(scanIntervalSlider - target) >= 1f) {
                 scanIntervalSlider = target
             }
-        }
-    }
-
-    LaunchedEffect(scanIntervalSlider) {
-        val desired = scanIntervalSlider.toLong().coerceIn(0L, 1500L)
-        if (desired != config.scanIntervalMs) {
-            kotlinx.coroutines.delay(90L)
-            onUpdateConfig { it.copy(scanIntervalMs = desired) }
         }
     }
 
@@ -392,13 +383,13 @@ fun SettingsScreen(
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "Задержка после переключения вкладки: ${tabSwitchSlider.toLong()} мс",
+                            text = "Скорость переключения вкладок: ${tabSwitchSlider.toLong()} мс",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Как в рабочем боте: оптимально ~400–450 мс (слишком низкие значения < 150 мс не дают игре прогрузить лоты)",
+                            text = "Чем больше число — тем медленнее переключение. Оптимально ~430–600 мс (для спокойного режима 800–1500 мс).",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -406,14 +397,17 @@ fun SettingsScreen(
                             value = tabSwitchSlider,
                             onValueChange = { v ->
                                 isDraggingTabSlider = true
+                                lastTabEditAtMs = System.currentTimeMillis()
                                 tabSwitchSlider = v
+                                onSetTabSwitchInterval(v.toLong().coerceIn(100L, 2500L), false)
                             },
                             onValueChangeFinished = {
                                 isDraggingTabSlider = false
-                                val ms = tabSwitchSlider.toLong().coerceIn(40L, 1500L)
-                                onUpdateConfig { it.copy(tabSwitchIntervalMs = ms) }
+                                lastTabEditAtMs = System.currentTimeMillis()
+                                val ms = tabSwitchSlider.toLong().coerceIn(100L, 2500L)
+                                onSetTabSwitchInterval(ms, true)
                             },
-                            valueRange = 40f..1500f,
+                            valueRange = 100f..2500f,
                             modifier = Modifier.testTag("settings_tab_switch_slider")
                         )
                         Row(
@@ -422,9 +416,10 @@ fun SettingsScreen(
                         ) {
                             OutlinedButton(
                                 onClick = {
-                                    val ms = (tabSwitchSlider.toLong() - 50L).coerceIn(40L, 1500L)
+                                    lastTabEditAtMs = System.currentTimeMillis()
+                                    val ms = (tabSwitchSlider.toLong() - 50L).coerceIn(100L, 2500L)
                                     tabSwitchSlider = ms.toFloat()
-                                    onUpdateConfig { it.copy(tabSwitchIntervalMs = ms) }
+                                    onSetTabSwitchInterval(ms, true)
                                 },
                                 modifier = Modifier
                                     .weight(1f)
@@ -435,8 +430,9 @@ fun SettingsScreen(
                             }
                             OutlinedButton(
                                 onClick = {
+                                    lastTabEditAtMs = System.currentTimeMillis()
                                     tabSwitchSlider = 430f
-                                    onUpdateConfig { it.copy(tabSwitchIntervalMs = 430L) }
+                                    onSetTabSwitchInterval(430L, true)
                                 },
                                 modifier = Modifier
                                     .weight(1f)
@@ -447,9 +443,10 @@ fun SettingsScreen(
                             }
                             OutlinedButton(
                                 onClick = {
-                                    val ms = (tabSwitchSlider.toLong() + 50L).coerceIn(40L, 1500L)
+                                    lastTabEditAtMs = System.currentTimeMillis()
+                                    val ms = (tabSwitchSlider.toLong() + 50L).coerceIn(100L, 2500L)
                                     tabSwitchSlider = ms.toFloat()
-                                    onUpdateConfig { it.copy(tabSwitchIntervalMs = ms) }
+                                    onSetTabSwitchInterval(ms, true)
                                 },
                                 modifier = Modifier
                                     .weight(1f)
@@ -472,14 +469,17 @@ fun SettingsScreen(
                             value = scanIntervalSlider,
                             onValueChange = { v ->
                                 isDraggingScanSlider = true
+                                lastScanEditAtMs = System.currentTimeMillis()
                                 scanIntervalSlider = v
+                                onSetScanInterval(v.toLong().coerceIn(0L, 2500L), false)
                             },
                             onValueChangeFinished = {
                                 isDraggingScanSlider = false
-                                val ms = scanIntervalSlider.toLong().coerceIn(0L, 1500L)
-                                onUpdateConfig { it.copy(scanIntervalMs = ms) }
+                                lastScanEditAtMs = System.currentTimeMillis()
+                                val ms = scanIntervalSlider.toLong().coerceIn(0L, 2500L)
+                                onSetScanInterval(ms, true)
                             },
-                            valueRange = 0f..1500f,
+                            valueRange = 0f..2500f,
                             modifier = Modifier.testTag("settings_scan_interval_slider")
                         )
                         Row(
@@ -488,9 +488,10 @@ fun SettingsScreen(
                         ) {
                             OutlinedButton(
                                 onClick = {
-                                    val ms = (scanIntervalSlider.toLong() - 50L).coerceIn(0L, 1500L)
+                                    lastScanEditAtMs = System.currentTimeMillis()
+                                    val ms = (scanIntervalSlider.toLong() - 50L).coerceIn(0L, 2500L)
                                     scanIntervalSlider = ms.toFloat()
-                                    onUpdateConfig { it.copy(scanIntervalMs = ms) }
+                                    onSetScanInterval(ms, true)
                                 },
                                 modifier = Modifier
                                     .weight(1f)
@@ -501,8 +502,9 @@ fun SettingsScreen(
                             }
                             OutlinedButton(
                                 onClick = {
+                                    lastScanEditAtMs = System.currentTimeMillis()
                                     scanIntervalSlider = 0f
-                                    onUpdateConfig { it.copy(scanIntervalMs = 0L) }
+                                    onSetScanInterval(0L, true)
                                 },
                                 modifier = Modifier
                                     .weight(1f)
@@ -513,9 +515,10 @@ fun SettingsScreen(
                             }
                             OutlinedButton(
                                 onClick = {
-                                    val ms = (scanIntervalSlider.toLong() + 50L).coerceIn(0L, 1500L)
+                                    lastScanEditAtMs = System.currentTimeMillis()
+                                    val ms = (scanIntervalSlider.toLong() + 50L).coerceIn(0L, 2500L)
                                     scanIntervalSlider = ms.toFloat()
-                                    onUpdateConfig { it.copy(scanIntervalMs = ms) }
+                                    onSetScanInterval(ms, true)
                                 },
                                 modifier = Modifier
                                     .weight(1f)

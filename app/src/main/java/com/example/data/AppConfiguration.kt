@@ -27,7 +27,7 @@ data class AppConfiguration(
     val usePriceThreshold: Boolean = true,
     val isLessThanOperator: Boolean = true,
     val scanIntervalMs: Long = 0L,
-    val tabSwitchIntervalMs: Long = 250L,
+    val tabSwitchIntervalMs: Long = 430L,
     val tabSwitchRandomizationMs: Int = 20,
     val clickRandomizationRadiusPx: Int = 10,
     val enableActualBuying: Boolean = true,

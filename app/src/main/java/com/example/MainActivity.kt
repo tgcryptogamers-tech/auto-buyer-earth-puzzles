@@ -262,6 +262,8 @@ private fun EarthPuzzlesApp(
                         SettingsScreen(
                             config = config,
                             onUpdateConfig = viewModel::updateConfiguration,
+                            onSetTabSwitchInterval = viewModel::setTabSwitchInterval,
+                            onSetScanInterval = viewModel::setScanInterval,
                             onToggleBuyTab = viewModel::toggleBuyTab,
                             onSelectBothBuyTabs = viewModel::selectBothBuyTabs,
                             onToggleCalibration = viewModel::setCalibrationEnabled,

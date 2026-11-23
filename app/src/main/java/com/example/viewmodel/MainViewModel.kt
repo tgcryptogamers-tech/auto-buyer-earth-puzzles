@@ -15,6 +15,7 @@ import com.example.engine.BotLogs
 import com.example.service.LootBuyerAccessibilityService
 import com.example.service.MediaProjectionHelper
 import com.example.service.OverlayControlService
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,11 +25,16 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getDatabase(application)
     private val configDao = db.configurationDao()
     private val purchaseDao = db.purchaseDao()
+    private val configMutex = Mutex()
+    private var tabIntervalSaveJob: Job? = null
+    private var scanIntervalSaveJob: Job? = null
 
     val configuration: StateFlow<AppConfiguration> = configDao.getConfigurationFlow()
         .map { it ?: AppConfiguration() }
@@ -101,8 +107,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateConfiguration(transform: (AppConfiguration) -> AppConfiguration) {
         viewModelScope.launch {
-            val current = configDao.getConfiguration() ?: AppConfiguration()
-            configDao.saveConfiguration(transform(current))
+            configMutex.withLock {
+                val current = configDao.getConfiguration() ?: AppConfiguration()
+                val next = transform(current)
+                LootBuyerAccessibilityService.updateLiveTimings(
+                    tabSwitchMs = next.tabSwitchIntervalMs,
+                    scanMs = next.scanIntervalMs
+                )
+                configDao.saveConfiguration(next)
+            }
+        }
+    }
+
+    fun setTabSwitchInterval(ms: Long, immediate: Boolean = false) {
+        val clamped = ms.coerceIn(100L, 2500L)
+        LootBuyerAccessibilityService.updateLiveTimings(tabSwitchMs = clamped)
+        tabIntervalSaveJob?.cancel()
+        tabIntervalSaveJob = viewModelScope.launch {
+            if (!immediate) delay(60L)
+            configMutex.withLock {
+                val current = configDao.getConfiguration() ?: AppConfiguration()
+                if (current.tabSwitchIntervalMs != clamped) {
+                    configDao.saveConfiguration(current.copy(tabSwitchIntervalMs = clamped))
+                }
+            }
+        }
+    }
+
+    fun setScanInterval(ms: Long, immediate: Boolean = false) {
+        val clamped = ms.coerceIn(0L, 2500L)
+        LootBuyerAccessibilityService.updateLiveTimings(scanMs = clamped)
+        scanIntervalSaveJob?.cancel()
+        scanIntervalSaveJob = viewModelScope.launch {
+            if (!immediate) delay(60L)
+            configMutex.withLock {
+                val current = configDao.getConfiguration() ?: AppConfiguration()
+                if (current.scanIntervalMs != clamped) {
+                    configDao.saveConfiguration(current.copy(scanIntervalMs = clamped))
+                }
+            }
         }
     }
 
